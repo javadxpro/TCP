@@ -7,7 +7,7 @@ binding = "CHAT_STORE"
 id = "your-kv-id"
 preview_id = "your-kv-preview-id"
 
-[[durable_objects]]
+[durable_objects]
 bindings = [
   { name = "VOICE_ROOMS", class_name = "VoiceRoom" }
 ]
