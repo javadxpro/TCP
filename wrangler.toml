@@ -1,0 +1,17 @@
+name = "chatgram"
+main = "worker.js"
+compatibility_date = "2024-01-01"
+
+[[kv_namespaces]]
+binding = "CHAT_STORE"
+id = "your-kv-id"
+preview_id = "your-kv-preview-id"
+
+[[durable_objects]]
+bindings = [
+  { name = "VOICE_ROOMS", class_name = "VoiceRoom" }
+]
+
+[[migrations]]
+tag = "v1"
+new_classes = ["VoiceRoom"]
