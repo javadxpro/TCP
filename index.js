@@ -1,17 +1,25 @@
 import manifest from './manifest.json';
+import svgIcon from './icon.svg';
 
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
 
-    // ۱. خواندن و ارسال فایل manifest.json
+    // ۱. سرو کردن مانیفست
     if (url.pathname === '/manifest.json') {
       return new Response(JSON.stringify(manifest), {
         headers: { 'content-type': 'application/json;charset=UTF-8' },
       });
     }
 
-    // ۲. مسیر اتصال WebSocket
+    // ۲. سرو کردن آیکون SVG
+    if (url.pathname === '/icon.svg') {
+      return new Response(svgIcon, {
+        headers: { 'content-type': 'image/svg+xml' },
+      });
+    }
+
+    // ۳. مسیر اتصال WebSocket
     if (url.pathname === '/ws') {
       const roomId = url.searchParams.get('room') || 'default';
       const id = env.CHAT_ROOM.idFromName(roomId);
@@ -19,7 +27,7 @@ export default {
       return roomObject.fetch(request);
     }
 
-    // ۳. سرو کردن فرانت‌اند HTML
+    // ۴. سرو کردن فرانت‌اند HTML
     return new Response(htmlContent, {
       headers: { 'content-type': 'text/html;charset=UTF-8' },
     });

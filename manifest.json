@@ -1,9 +1,17 @@
 {
-  "name": "GamingGram - chat &amp; voice chat in game",
-  "short_name": "GamingGram",
-  "description": "GamingGram a app for chat &amp; voice chat in game",
+  "name": "Gaming Voice Chat",
+  "short_name": "GamingVoice",
+  "description": "برنامه چت صوتی و متنی گیمینگ",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#0f172a",
-  "theme_color": "#0f172a"
+  "theme_color": "#0f172a",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
 }
