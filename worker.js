@@ -61,7 +61,7 @@ export default {
 
     // ===== API ها =====
 
-    // دریافت پیام‌های ذخیره شده
+    // دریافت پیام‌های ذخیره شده از KV
     if (path === '/api/messages' && request.method === 'GET') {
       try {
         const messages = await env.VL_DB.get('messages', 'json') || [];
@@ -96,7 +96,6 @@ export default {
 
           // پیام خوش‌آمدگویی
           if (data.type === 'welcome') {
-            // ذخیره در KV
             const messages = await env.VL_DB.get('messages', 'json') || [];
             const welcomeMsg = {
               id: Date.now(),
@@ -111,7 +110,6 @@ export default {
             }
             await env.VL_DB.put('messages', JSON.stringify(messages));
 
-            // ارسال به همه
             for (const client of chatClients) {
               if (client.readyState === 1) {
                 client.send(JSON.stringify(welcomeMsg));
@@ -122,7 +120,6 @@ export default {
 
           // پیام معمولی
           if (data.type === 'message') {
-            // ذخیره در KV
             const messages = await env.VL_DB.get('messages', 'json') || [];
             const newMsg = {
               id: Date.now(),
@@ -137,7 +134,6 @@ export default {
             }
             await env.VL_DB.put('messages', JSON.stringify(messages));
 
-            // ارسال به همه
             for (const client of chatClients) {
               if (client !== server && client.readyState === 1) {
                 client.send(JSON.stringify(newMsg));
@@ -480,7 +476,7 @@ function connectChat() {
     console.log('✅ چت متصل شد');
     reconnectAttempts = 0;
     
-    // بارگذاری پیام‌های قبلی
+    // بارگذاری پیام‌های قبلی از KV
     loadMessages();
     
     // ارسال پیام خوش‌آمدگویی
