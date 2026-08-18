@@ -2,8 +2,6 @@
 
 let chatClients = new Set();
 
-// ===== Durable Object برای اتاق صوتی =====
-
 export class VoiceRoom {
   constructor(state, env) {
     this.state = state;
@@ -52,31 +50,14 @@ export class VoiceRoom {
   }
 }
 
-// ===== Worker اصلی =====
-
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     const path = url.pathname;
 
-    // ===== API ها =====
-
-    // دریافت پیام‌های ذخیره شده از KV
-    if (path === '/api/messages' && request.method === 'GET') {
-      try {
-        const messages = await env.VL_DB.get('messages', 'json') || [];
-        return Response.json(messages.slice(-100));
-      } catch (e) {
-        return Response.json([]);
-      }
-    }
-
-    // دریافت تعداد کاربران آنلاین
     if (path === '/api/online' && request.method === 'GET') {
       return Response.json({ count: chatClients.size + 1 });
     }
-
-    // ===== WebSocket چت =====
 
     if (path === '/ws/chat') {
       const upgrade = request.headers.get("Upgrade");
@@ -94,49 +75,19 @@ export default {
         try {
           const data = JSON.parse(event.data);
 
-          // پیام خوش‌آمدگویی
           if (data.type === 'welcome') {
-            const messages = await env.VL_DB.get('messages', 'json') || [];
-            const welcomeMsg = {
-              id: Date.now(),
-              sender: data.sender,
-              text: data.text,
-              timestamp: data.timestamp,
-              type: 'welcome'
-            };
-            messages.push(welcomeMsg);
-            if (messages.length > 500) {
-              messages.splice(0, messages.length - 500);
-            }
-            await env.VL_DB.put('messages', JSON.stringify(messages));
-
             for (const client of chatClients) {
               if (client.readyState === 1) {
-                client.send(JSON.stringify(welcomeMsg));
+                client.send(JSON.stringify(data));
               }
             }
             return;
           }
 
-          // پیام معمولی
           if (data.type === 'message') {
-            const messages = await env.VL_DB.get('messages', 'json') || [];
-            const newMsg = {
-              id: Date.now(),
-              sender: data.sender,
-              text: data.text,
-              timestamp: data.timestamp || new Date().toISOString(),
-              type: 'message'
-            };
-            messages.push(newMsg);
-            if (messages.length > 500) {
-              messages.splice(0, messages.length - 500);
-            }
-            await env.VL_DB.put('messages', JSON.stringify(messages));
-
             for (const client of chatClients) {
               if (client !== server && client.readyState === 1) {
-                client.send(JSON.stringify(newMsg));
+                client.send(JSON.stringify(data));
               }
             }
           }
@@ -155,8 +106,6 @@ export default {
       });
     }
 
-    // ===== WebSocket اتاق صوتی =====
-
     if (path.startsWith('/ws/voice/')) {
       const roomId = path.split('/')[3] || 'default';
       const upgrade = request.headers.get("Upgrade");
@@ -168,8 +117,6 @@ export default {
       const obj = env.VOICE_ROOMS.get(id);
       return obj.fetch(request);
     }
-
-    // ===== صفحات HTML/CSS/JS =====
 
     if (path === '/' || path === '/index.html') {
       return new Response(await getIndexHTML(), {
@@ -212,15 +159,20 @@ async function getIndexHTML() {
     
     <main>
         <div class="chat-container">
-            <div class="messages" id="messagesContainer"></div>
+            <div class="messages" id="messagesContainer">
+                <div class="message received">
+                    <span class="sender">ربات</span>
+                    👋 به چتگرام خوش آمدید! پیام بنویسید.
+                    <span class="time">همین الان</span>
+                </div>
+            </div>
             <div class="input-area">
                 <input type="text" id="messageInput" placeholder="پیام بنویسید..." onkeypress="if(event.key==='Enter') sendMessage()">
-                <button onclick="sendMessage()">📤</button>
+                <button id="sendBtn" onclick="sendMessage()">📤</button>
             </div>
         </div>
     </main>
 
-    <!-- دکمه بزرگ قطع/وصل صوتی -->
     <button id="bigVoiceBtn" onclick="toggleVoice()">🎙️ اتصال صوتی</button>
 
     <script src="/script.js"></script>
@@ -374,42 +326,43 @@ main {
   color: #666;
 }
 
-.input-area button {
+#sendBtn {
   width: 44px;
   height: 44px;
   border: none;
   border-radius: 50%;
   background: #5B4B8A;
   color: white;
-  font-size: 18px;
+  font-size: 20px;
   cursor: pointer;
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
-.input-area button:hover {
+#sendBtn:hover {
   background: #7B6BAA;
 }
 
-/* ===== دکمه بزرگ قطع/وصل صوتی ===== */
 #bigVoiceBtn {
   position: fixed;
-  bottom: 100px;
+  bottom: 80px;
   left: 50%;
   transform: translateX(-50%);
   background: #5B4B8A;
   color: white;
   border: none;
-  padding: 18px 44px;
+  padding: 16px 40px;
   border-radius: 50px;
-  font-size: 22px;
+  font-size: 20px;
   font-weight: 700;
   cursor: pointer;
   box-shadow: 0 8px 32px rgba(91, 75, 138, 0.5);
   z-index: 999;
   transition: all 0.3s;
-  min-width: 220px;
+  min-width: 200px;
   text-align: center;
-  letter-spacing: 1px;
 }
 
 #bigVoiceBtn:hover {
@@ -426,13 +379,12 @@ main {
   background: #DC2626;
 }
 
-/* موبایل */
 @media (max-width: 768px) {
   #bigVoiceBtn {
-    bottom: 70px;
-    padding: 14px 28px;
-    font-size: 18px;
-    min-width: 160px;
+    bottom: 60px;
+    padding: 12px 24px;
+    font-size: 16px;
+    min-width: 150px;
   }
 }
 
@@ -453,9 +405,7 @@ main {
 // ==================== JavaScript ====================
 
 async function getScriptJS() {
-  return `// ====== چتگرام - سمت کلاینت ======
-
-let ws = null;
+  return `let ws = null;
 let voiceWs = null;
 let voiceStream = null;
 let username = prompt('نام خود را وارد کنید:', 'کاربر') || 'ناشناس';
@@ -463,8 +413,6 @@ let isVoiceConnected = false;
 let reconnectAttempts = 0;
 let audioContext = null;
 let processor = null;
-
-// ===== اتصال به چت =====
 
 function connectChat() {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -475,11 +423,6 @@ function connectChat() {
   ws.onopen = () => {
     console.log('✅ چت متصل شد');
     reconnectAttempts = 0;
-    
-    // بارگذاری پیام‌های قبلی از KV
-    loadMessages();
-    
-    // ارسال پیام خوش‌آمدگویی
     ws.send(JSON.stringify({
       type: 'welcome',
       sender: 'ربات',
@@ -504,21 +447,6 @@ function connectChat() {
   };
 }
 
-// ===== بارگذاری پیام‌های قبلی از KV =====
-
-function loadMessages() {
-  fetch('/api/messages')
-    .then(res => res.json())
-    .then(messages => {
-      const container = document.getElementById('messagesContainer');
-      container.innerHTML = '';
-      messages.forEach(appendMessage);
-    })
-    .catch(() => {});
-}
-
-// ===== ارسال پیام =====
-
 function sendMessage() {
   const input = document.getElementById('messageInput');
   const text = input.value.trim();
@@ -533,8 +461,6 @@ function sendMessage() {
   
   input.value = '';
 }
-
-// ===== نمایش پیام =====
 
 function appendMessage(msg) {
   const container = document.getElementById('messagesContainer');
@@ -554,8 +480,6 @@ function appendMessage(msg) {
   container.scrollTop = container.scrollHeight;
 }
 
-// ===== تعداد آنلاین =====
-
 function updateOnlineCount() {
   fetch('/api/online')
     .then(res => res.json())
@@ -565,13 +489,10 @@ function updateOnlineCount() {
     .catch(() => {});
 }
 
-// ===== دکمه بزرگ قطع/وصل صوتی =====
-
 async function toggleVoice() {
   const btn = document.getElementById('bigVoiceBtn');
   
   if (isVoiceConnected) {
-    // قطع اتصال
     if (voiceWs) voiceWs.close();
     if (voiceStream) {
       voiceStream.getTracks().forEach(track => track.stop());
@@ -591,7 +512,6 @@ async function toggleVoice() {
     return;
   }
   
-  // اتصال صوتی
   try {
     voiceStream = await navigator.mediaDevices.getUserMedia({ 
       audio: { echoCancellation: true, noiseSuppression: true }
@@ -670,8 +590,6 @@ async function toggleVoice() {
     alert('لطفاً دسترسی به میکروفون را اجازه دهید!');
   }
 }
-
-// ===== شروع =====
 
 connectChat();
 updateOnlineCount();
