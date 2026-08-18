@@ -1,21 +1,21 @@
 import manifest from './manifest.json';
-import svgIcon from './icon.svg';
+import svgIcon from './icon.js';
 
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
 
-    // ۱. سرو کردن مانیفست
+    // ۱. سرو کردن فایل مانیفست PWA
     if (url.pathname === '/manifest.json') {
       return new Response(JSON.stringify(manifest), {
         headers: { 'content-type': 'application/json;charset=UTF-8' },
       });
     }
 
-    // ۲. سرو کردن آیکون SVG
+    // ۲. سرو کردن آیکون برنامه
     if (url.pathname === '/icon.svg') {
       return new Response(svgIcon, {
-        headers: { 'content-type': 'image/svg+xml' },
+        headers: { 'content-type': 'image/svg+xml;charset=UTF-8' },
       });
     }
 
@@ -27,13 +27,14 @@ export default {
       return roomObject.fetch(request);
     }
 
-    // ۴. سرو کردن فرانت‌اند HTML
+    // ۴. سرو کردن فرانت‌اند اصلی
     return new Response(htmlContent, {
       headers: { 'content-type': 'text/html;charset=UTF-8' },
     });
   }
 };
 
+// --- کلاس مدیریت روم‌ها (Durable Object) ---
 export class ChatRoom {
   constructor(state, env) {
     this.state = state;
@@ -64,6 +65,7 @@ export class ChatRoom {
 
     data.sender = peerId;
 
+    // ارسال پیام برای بقیه اعضای روم
     for (const socket of this.state.getWebSockets()) {
       if (socket !== ws) {
         try {
@@ -87,18 +89,21 @@ export class ChatRoom {
   }
 }
 
+// --- کد فرانت‌اند HTML/CSS/JS ---
 const htmlContent = `<!DOCTYPE html>
 <html lang="fa" dir="rtl">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#0f172a">
   <link rel="manifest" href="/manifest.json">
+  <link rel="icon" type="image/svg+xml" href="/icon.svg">
   <title>🎮 چت و ویس گیمینگ چندنفره</title>
   <style>
     * { box-sizing: border-box; font-family: system-ui, -apple-system, sans-serif; }
     body { background: #0f172a; color: #f8fafc; margin: 0; padding: 20px; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
     .card { width: 100%; max-width: 500px; background: #1e293b; padding: 20px; border-radius: 14px; box-shadow: 0 8px 20px rgba(0,0,0,0.4); }
-    h2 { text-align: center; margin-top: 0; color: #38bdf8; font-size: 20px; }
+    h2 { text-align: center; margin-top: 0; color: #38bdf8; font-size: 20px; display: flex; align-items: center; justify-content: center; gap: 8px; }
     .flex { display: flex; gap: 8px; margin-bottom: 12px; }
     input, button { padding: 10px 14px; border-radius: 8px; border: 1px solid #334155; font-size: 14px; outline: none; }
     input { background: #0f172a; color: #fff; flex: 1; }
@@ -120,7 +125,7 @@ const htmlContent = `<!DOCTYPE html>
 <body>
 
 <div class="card" onclick="enableAudioPlayback()">
-  <h2>🎮 چت و ویس گیمینگ</h2>
+  <h2><img src="/icon.svg" width="28" height="28"> چت و ویس گیمینگ</h2>
 
   <div id="join-form" class="flex">
     <input id="username" placeholder="نام شما" value="بازیکن ۱">
