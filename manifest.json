@@ -8,7 +8,7 @@
   "theme_color": "#9f00b5",
   "icons": [
     {
-      "src": "https://raw.githubusercontent.com/javadxpro/XP_PROJECT/refs/heads/main/launchericon-144x144.png",
+      "src": "https://raw.githubusercontent.com/javadxpro/XP_PROJECT/refs/heads/main/launchericon-144x144.png;",
       "sizes": "144x144",
       "type": "image/svg+xml"
     }
