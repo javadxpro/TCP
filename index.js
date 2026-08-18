@@ -2,174 +2,336 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
 
-    // ۱. مدیریت ارتباط چت متنی و سیگنالینگ صوتی (WebSocket)
+    // مسیر اتصال WebSocket برای چت و سیگنالینگ صوتی
     if (url.pathname === '/ws') {
-      const upgradeHeader = request.headers.get('Upgrade');
-      if (!upgradeHeader || upgradeHeader !== 'websocket') {
-        return new Response('ارتباط باید WebSocket باشد.', { status: 426 });
-      }
-
-      const webSocketPair = new WebSocketPair();
-      const [client, server] = Object.values(webSocketPair);
-
-      server.accept();
-
-      server.addEventListener('message', event => {
-        try {
-          const data = JSON.parse(event.data);
-          server.send(JSON.stringify(data));
-        } catch (e) {}
-      });
-
-      return new Response(null, { status: 101, webSocket: client });
+      const roomId = url.searchParams.get('room') || 'default';
+      const id = env.CHAT_ROOM.idFromName(roomId);
+      const roomObject = env.CHAT_ROOM.get(id);
+      return roomObject.fetch(request);
     }
 
-    // ۲. سرو کردن مستقیم فرانت‌اند HTML
+    // سرو کردن فرانت‌اند HTML
     return new Response(htmlContent, {
       headers: { 'content-type': 'text/html;charset=UTF-8' },
     });
   }
 };
 
-// فرانت‌اند کامل برنامه
+// کلاس Durable Object برای مدیریت روم چندنفره
+export class ChatRoom {
+  constructor(state, env) {
+    this.state = state;
+  }
+
+  async fetch(request) {
+    if (request.headers.get('Upgrade') !== 'websocket') {
+      return new Response('Expected WebSocket', { status: 426 });
+    }
+
+    const pair = new WebSocketPair();
+    const [client, server] = Object.values(pair);
+
+    const peerId = 'user_' + Math.random().toString(36).substring(2, 7);
+    this.state.acceptWebSocket(server, [peerId]);
+
+    return new Response(null, { status: 101, webSocket: client });
+  }
+
+  async webSocketMessage(ws, message) {
+    const tags = this.state.getTags(ws);
+    const peerId = tags[0] || 'unknown';
+
+    let data;
+    try {
+      data = JSON.parse(message);
+    } catch(e) { return; }
+
+    data.sender = peerId;
+
+    // ارسال پیام/سیگنال به تمام اعضای حاضر در روم (به جز فرستنده)
+    for (const socket of this.state.getWebSockets()) {
+      if (socket !== ws) {
+        try {
+          socket.send(JSON.stringify(data));
+        } catch (e) {}
+      }
+    }
+  }
+
+  async webSocketClose(ws) {
+    const tags = this.state.getTags(ws);
+    const peerId = tags[0];
+
+    for (const socket of this.state.getWebSockets()) {
+      if (socket !== ws) {
+        try {
+          socket.send(JSON.stringify({ type: 'peer-left', sender: peerId }));
+        } catch (e) {}
+      }
+    }
+  }
+}
+
+// فرانت‌اند پروژه
 const htmlContent = `<!DOCTYPE html>
 <html lang="fa" dir="rtl">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Gaming Voice & Quick Chat</title>
+  <title>🎮 چت و ویس گیمینگ چندنفره</title>
   <style>
-    body { font-family: system-ui, sans-serif; background: #0f172a; color: #f8fafc; text-align: center; margin: 0; padding: 20px; }
-    .card { max-width: 450px; margin: auto; background: #1e293b; padding: 20px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
-    input, button { padding: 10px 14px; border-radius: 8px; border: none; font-size: 14px; margin: 4px; }
-    input { background: #334155; color: #fff; width: 60%; outline: none; }
-    .btn { background: #2563eb; color: #fff; cursor: pointer; font-weight: bold; }
+    * { box-sizing: border-box; font-family: system-ui, -apple-system, sans-serif; }
+    body { background: #0f172a; color: #f8fafc; margin: 0; padding: 20px; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
+    .card { width: 100%; max-width: 500px; background: #1e293b; padding: 20px; border-radius: 14px; box-shadow: 0 8px 20px rgba(0,0,0,0.4); }
+    h2 { text-align: center; margin-top: 0; color: #38bdf8; font-size: 20px; }
+    .flex { display: flex; gap: 8px; margin-bottom: 12px; }
+    input, button { padding: 10px 14px; border-radius: 8px; border: 1px solid #334155; font-size: 14px; outline: none; }
+    input { background: #0f172a; color: #fff; flex: 1; }
+    button { background: #2563eb; color: #fff; border: none; cursor: pointer; font-weight: bold; }
+    button:hover { background: #1d4ed8; }
     .btn-danger { background: #ef4444; }
+    .btn-danger:hover { background: #dc2626; }
     .btn-success { background: #22c55e; }
-    .quick-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 15px 0; }
-    .quick-btn { background: #475569; color: #fff; cursor: pointer; border: 1px solid #64748b; }
-    .quick-btn:hover { background: #64748b; }
-    #chat-log { height: 160px; background: #0f172a; overflow-y: auto; padding: 10px; border-radius: 8px; text-align: right; font-size: 13px; }
+    .btn-success:hover { background: #16a34a; }
+    .section-title { font-size: 13px; color: #94a3b8; margin: 12px 0 6px 0; font-weight: 600; display: flex; justify-content: space-between; }
+    #peers-list { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+    .peer-chip { background: #0f172a; border: 1px solid #334155; padding: 4px 10px; border-radius: 20px; font-size: 12px; color: #38bdf8; }
+    #chat-box { height: 200px; background: #0f172a; border-radius: 8px; padding: 10px; overflow-y: auto; border: 1px solid #334155; margin-bottom: 10px; display: flex; flex-direction: column; gap: 6px; }
+    .msg { font-size: 13px; line-height: 1.4; word-break: break-word; }
+    .msg .sender { font-weight: bold; color: #38bdf8; margin-left: 4px; }
+    .msg.system { color: #64748b; font-style: italic; font-size: 12px; }
   </style>
 </head>
 <body>
 
 <div class="card">
   <h2>🎮 چت و ویس گیمینگ</h2>
-  <div>
-    <input id="roomInput" placeholder="شناسه روم (مثلاً team1)" value="room1">
-    <button class="btn" onclick="joinRoom()">ورود</button>
+
+  <!-- فرم ورود -->
+  <div id="join-form" class="flex">
+    <input id="username" placeholder="نام شما" value="بازیکن ۱">
+    <input id="room" placeholder="روم" value="team1" style="max-width: 100px;">
+    <button onclick="connect()">ورود</button>
   </div>
 
-  <div style="margin-top: 15px;">
-    <button id="micBtn" class="btn btn-danger" onclick="toggleMic()" disabled>🎙️ میکروفون: خاموش</button>
-  </div>
+  <!-- پنل چت و ویس -->
+  <div id="room-panel" style="display: none;">
+    <div class="flex" style="justify-content: space-between;">
+      <button id="mic-btn" class="btn-danger" onclick="toggleMic()">🎙️ میکروفون: خاموش</button>
+      <button class="btn-danger" style="background:#475569;" onclick="location.reload()">خروج</button>
+    </div>
 
-  <h3>⚡ چت سریع</h3>
-  <div class="quick-grid">
-    <button class="quick-btn" onclick="sendQuick('🎯 دشمن دیدم!')">🎯 دشمن دیدم!</button>
-    <button class="quick-btn" onclick="sendQuick('🚨 کمک لازم دارم!')">🚨 کمک!</button>
-    <button class="quick-btn" onclick="sendQuick('⚔️ حملـه!')">⚔️ حمله!</button>
-    <button class="quick-btn" onclick="sendQuick('🛡️ عقب‌نشینی!')">🛡️ عقب‌نشینی!</button>
-  </div>
+    <div class="section-title">
+      <span>اعضای حاضر در روم:</span>
+      <span id="peer-count">1 نفر</span>
+    </div>
+    <div id="peers-list">
+      <div class="peer-chip">👤 شما (<span id="my-name"></span>)</div>
+    </div>
 
-  <div id="chat-log"></div>
+    <div class="section-title">💬 چت متنی</div>
+    <div id="chat-box"></div>
+
+    <form class="flex" onsubmit="sendMessage(event)">
+      <input id="chat-input" placeholder="پیام خود را بنویسید..." autocomplete="off">
+      <button type="submit">ارسال</button>
+    </form>
+  </div>
 </div>
 
+<div id="audio-container" style="display:none;"></div>
+
 <script>
-  let ws, localStream, peerConn, room;
+  let ws, localStream;
+  const peers = {}; // نگهداری اتصال کانکشن به بقیه بازیکنان
   const rtcConfig = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
 
-  function joinRoom() {
-    room = document.getElementById('roomInput').value.trim();
-    if (!room) return;
+  function connect() {
+    const username = document.getElementById('username').value.trim() || 'بازیکن';
+    const room = document.getElementById('room').value.trim() || 'default';
+    document.getElementById('my-name').innerText = username;
 
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
     ws = new WebSocket(\`\${protocol}//\${location.host}/ws?room=\${room}\`);
 
+    ws.onopen = () => {
+      document.getElementById('join-form').style.display = 'none';
+      document.getElementById('room-panel').style.display = 'block';
+      addSystemMsg(\`وارد روم [\${room}] شدید.\`);
+      ws.send(JSON.stringify({ type: 'join', name: username }));
+    };
+
     ws.onmessage = async (e) => {
       const msg = JSON.parse(e.data);
-      if (msg.type === 'chat') {
-        logMessage(msg.text);
-      } else if (msg.type === 'signal') {
-        handleSignal(msg.data);
+      handleSignalMessage(msg);
+    };
+
+    ws.onclose = () => addSystemMsg("اتصال قطع شد.");
+  }
+
+  async function handleSignalMessage(msg) {
+    const sender = msg.sender;
+
+    switch (msg.type) {
+      case 'join':
+        addSystemMsg(\`\${msg.name} وارد شد.\`);
+        ws.send(JSON.stringify({ type: 'welcome', target: sender, name: document.getElementById('username').value }));
+        updatePeerList(sender, msg.name);
+        if (localStream) createPeerConnection(sender, msg.name, true);
+        break;
+
+      case 'welcome':
+        updatePeerList(sender, msg.name);
+        break;
+
+      case 'chat':
+        addChatMsg(msg.name, msg.text);
+        break;
+
+      case 'offer':
+        const pc = createPeerConnection(sender, msg.name, false);
+        await pc.setRemoteDescription(new RTCSessionDescription(msg.sdp));
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        ws.send(JSON.stringify({ type: 'answer', target: sender, sdp: answer }));
+        break;
+
+      case 'answer':
+        if (peers[sender]?.pc) {
+          await peers[sender].pc.setRemoteDescription(new RTCSessionDescription(msg.sdp));
+        }
+        break;
+
+      case 'ice':
+        if (peers[sender]?.pc) {
+          try { await peers[sender].pc.addIceCandidate(new RTCIceCandidate(msg.candidate)); } catch (e) {}
+        }
+        break;
+
+      case 'peer-left':
+        removePeer(sender);
+        break;
+    }
+  }
+
+  function createPeerConnection(peerId, peerName, isInitiator) {
+    if (peers[peerId]?.pc) return peers[peerId].pc;
+
+    const pc = new RTCPeerConnection(rtcConfig);
+    peers[peerId] = { pc, name: peerName };
+
+    if (localStream) {
+      localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+    }
+
+    pc.ontrack = (event) => {
+      let audioEl = document.getElementById(\`audio-\${peerId}\`);
+      if (!audioEl) {
+        audioEl = document.createElement('audio');
+        audioEl.id = \`audio-\${peerId}\`;
+        audioEl.autoplay = true;
+        document.getElementById('audio-container').appendChild(audioEl);
+      }
+      audioEl.srcObject = event.streams[0];
+    };
+
+    pc.onicecandidate = (event) => {
+      if (event.candidate) {
+        ws.send(JSON.stringify({ type: 'ice', target: peerId, candidate: event.candidate }));
       }
     };
 
-    document.getElementById('micBtn').disabled = false;
-    logMessage(\`وارد روم [\${room}] شدید.\`);
+    if (isInitiator) {
+      pc.createOffer().then(offer => {
+        pc.setLocalDescription(offer);
+        ws.send(JSON.stringify({ type: 'offer', target: peerId, sdp: offer, name: document.getElementById('username').value }));
+      });
+    }
+
+    return pc;
   }
 
   async function toggleMic() {
-    const btn = document.getElementById('micBtn');
+    const btn = document.getElementById('mic-btn');
     if (!localStream) {
       try {
         localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
         btn.innerText = "🎙️ میکروفون: روشن";
-        btn.className = "btn btn-success";
-        initWebRTC();
+        btn.className = "btn-success";
+        Object.keys(peers).forEach(peerId => createPeerConnection(peerId, peers[peerId].name, true));
       } catch (err) {
-        alert("دسترسی به میکروفون داده نشد!");
+        alert("خطا در دسترسی به میکروفون!");
       }
     } else {
       localStream.getTracks().forEach(track => track.stop());
       localStream = null;
-      if (peerConn) peerConn.close();
       btn.innerText = "🎙️ میکروفون: خاموش";
-      btn.className = "btn btn-danger";
+      btn.className = "btn-danger";
+      Object.keys(peers).forEach(peerId => {
+        if (peers[peerId].pc) peers[peerId].pc.close();
+        delete peers[peerId];
+      });
+      document.getElementById('audio-container').innerHTML = '';
     }
   }
 
-  async function initWebRTC() {
-    peerConn = new RTCPeerConnection(rtcConfig);
-    localStream.getTracks().forEach(track => peerConn.addTrack(track, localStream));
+  function sendMessage(e) {
+    e.preventDefault();
+    const input = document.getElementById('chat-input');
+    const text = input.value.trim();
+    const name = document.getElementById('username').value.trim();
 
-    peerConn.ontrack = (e) => {
-      let audio = document.getElementById('remoteAudio');
-      if (!audio) {
-        audio = new Audio();
-        audio.id = 'remoteAudio';
-        audio.autoplay = true;
-        document.body.appendChild(audio);
-      }
-      audio.srcObject = e.streams[0];
-    };
-
-    peerConn.onicecandidate = (e) => {
-      if (e.candidate) {
-        ws.send(JSON.stringify({ type: 'signal', data: { candidate: e.candidate } }));
-      }
-    };
-
-    const offer = await peerConn.createOffer();
-    await peerConn.setLocalDescription(offer);
-    ws.send(JSON.stringify({ type: 'signal', data: { sdp: offer } }));
-  }
-
-  async function handleSignal(data) {
-    if (!peerConn) initWebRTC();
-    if (data.sdp) {
-      await peerConn.setRemoteDescription(new RTCSessionDescription(data.sdp));
-      if (data.sdp.type === 'offer') {
-        const answer = await peerConn.createAnswer();
-        await peerConn.setLocalDescription(answer);
-        ws.send(JSON.stringify({ type: 'signal', data: { sdp: answer } }));
-      }
-    } else if (data.candidate) {
-      await peerConn.addIceCandidate(new RTCIceCandidate(data.candidate));
+    if (text && ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'chat', name, text }));
+      addChatMsg('شما', text);
+      input.value = '';
     }
   }
 
-  function sendQuick(text) {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: 'chat', text }));
+  function addChatMsg(sender, text) {
+    const box = document.getElementById('chat-box');
+    const div = document.createElement('div');
+    div.className = 'msg';
+    div.innerHTML = \`<span class="sender">\${sender}:</span> \${escapeHtml(text)}\`;
+    box.appendChild(div);
+    box.scrollTop = box.scrollHeight;
+  }
+
+  function addSystemMsg(text) {
+    const box = document.getElementById('chat-box');
+    const div = document.createElement('div');
+    div.className = 'msg system';
+    div.innerText = \`• \${text}\`;
+    box.appendChild(div);
+    box.scrollTop = box.scrollHeight;
+  }
+
+  function updatePeerList(peerId, peerName) {
+    if (!document.getElementById(\`peer-\${peerId}\`)) {
+      const list = document.getElementById('peers-list');
+      const chip = document.createElement('div');
+      chip.className = 'peer-chip';
+      chip.id = \`peer-\${peerId}\`;
+      chip.innerText = \`👤 \${peerName}\`;
+      list.appendChild(chip);
+      document.getElementById('peer-count').innerText = \`\${list.children.length} نفر\`;
     }
   }
 
-  function logMessage(txt) {
-    const log = document.getElementById('chat-log');
-    log.innerHTML += \`<div>• \${txt}</div>\`;
-    log.scrollTop = log.scrollHeight;
+  function removePeer(peerId) {
+    if (peers[peerId]) {
+      if (peers[peerId].pc) peers[peerId].pc.close();
+      delete peers[peerId];
+    }
+    const chip = document.getElementById(\`peer-\${peerId}\`);
+    if (chip) chip.remove();
+    const audioEl = document.getElementById(\`audio-\${peerId}\`);
+    if (audioEl) audioEl.remove();
+    document.getElementById('peer-count').innerText = \`\${document.getElementById('peers-list').children.length} نفر\`;
+  }
+
+  function escapeHtml(str) {
+    return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   }
 </script>
 </body>
