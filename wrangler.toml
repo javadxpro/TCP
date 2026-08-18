@@ -1,3 +1,7 @@
 name = "tcp"
 main = "worker.js"
 compatibility_date = "2024-01-01"
+
+[[kv_namespaces]]
+binding = "vl.db"
+id = "e1eb0de10abb4133871634da80ad9c04"
