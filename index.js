@@ -73,6 +73,7 @@ const htmlContent = `<!DOCTYPE html>
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="rel" href="data:application/manifest+json;utf8,{%22name%22:%22Gaming%20Voice%22,%22short_name%22:%22Voice%22,%22start_url%22:%22/%22,%22display%22:%22standalone%22,%22background_color%22:%22#0f172a%22,%22theme_color%22:%22#0f172a%22}">
   <title>🎮 چت و ویس گیمینگ چندنفره</title>
   <style>
     * { box-sizing: border-box; font-family: system-ui, -apple-system, sans-serif; }
