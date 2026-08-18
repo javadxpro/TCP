@@ -2,6 +2,7 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
 
+    // ۱. مدیریت ارتباط چت متنی و سیگنالینگ صوتی (WebSocket)
     if (url.pathname === '/ws') {
       const upgradeHeader = request.headers.get('Upgrade');
       if (!upgradeHeader || upgradeHeader !== 'websocket') {
@@ -13,11 +14,9 @@ export default {
 
       server.accept();
 
-      // مدیریت پیام‌های دریافتی و ارسال همگانی (Broadcast)
       server.addEventListener('message', event => {
         try {
           const data = JSON.parse(event.data);
-          // در سرور ساده سیگنال‌ها بازپخش می‌شوند
           server.send(JSON.stringify(data));
         } catch (e) {}
       });
@@ -25,6 +24,153 @@ export default {
       return new Response(null, { status: 101, webSocket: client });
     }
 
-    return env.ASSETS ? env.ASSETS.fetch(request) : new Response('Not Found', { status: 404 });
+    // ۲. سرو کردن مستقیم فرانت‌اند HTML
+    return new Response(htmlContent, {
+      headers: { 'content-type': 'text/html;charset=UTF-8' },
+    });
   }
 };
+
+// فرانت‌اند کامل برنامه
+const htmlContent = `<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Gaming Voice & Quick Chat</title>
+  <style>
+    body { font-family: system-ui, sans-serif; background: #0f172a; color: #f8fafc; text-align: center; margin: 0; padding: 20px; }
+    .card { max-width: 450px; margin: auto; background: #1e293b; padding: 20px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
+    input, button { padding: 10px 14px; border-radius: 8px; border: none; font-size: 14px; margin: 4px; }
+    input { background: #334155; color: #fff; width: 60%; outline: none; }
+    .btn { background: #2563eb; color: #fff; cursor: pointer; font-weight: bold; }
+    .btn-danger { background: #ef4444; }
+    .btn-success { background: #22c55e; }
+    .quick-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 15px 0; }
+    .quick-btn { background: #475569; color: #fff; cursor: pointer; border: 1px solid #64748b; }
+    .quick-btn:hover { background: #64748b; }
+    #chat-log { height: 160px; background: #0f172a; overflow-y: auto; padding: 10px; border-radius: 8px; text-align: right; font-size: 13px; }
+  </style>
+</head>
+<body>
+
+<div class="card">
+  <h2>🎮 چت و ویس گیمینگ</h2>
+  <div>
+    <input id="roomInput" placeholder="شناسه روم (مثلاً team1)" value="room1">
+    <button class="btn" onclick="joinRoom()">ورود</button>
+  </div>
+
+  <div style="margin-top: 15px;">
+    <button id="micBtn" class="btn btn-danger" onclick="toggleMic()" disabled>🎙️ میکروفون: خاموش</button>
+  </div>
+
+  <h3>⚡ چت سریع</h3>
+  <div class="quick-grid">
+    <button class="quick-btn" onclick="sendQuick('🎯 دشمن دیدم!')">🎯 دشمن دیدم!</button>
+    <button class="quick-btn" onclick="sendQuick('🚨 کمک لازم دارم!')">🚨 کمک!</button>
+    <button class="quick-btn" onclick="sendQuick('⚔️ حملـه!')">⚔️ حمله!</button>
+    <button class="quick-btn" onclick="sendQuick('🛡️ عقب‌نشینی!')">🛡️ عقب‌نشینی!</button>
+  </div>
+
+  <div id="chat-log"></div>
+</div>
+
+<script>
+  let ws, localStream, peerConn, room;
+  const rtcConfig = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+
+  function joinRoom() {
+    room = document.getElementById('roomInput').value.trim();
+    if (!room) return;
+
+    const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    ws = new WebSocket(\`\${protocol}//\${location.host}/ws?room=\${room}\`);
+
+    ws.onmessage = async (e) => {
+      const msg = JSON.parse(e.data);
+      if (msg.type === 'chat') {
+        logMessage(msg.text);
+      } else if (msg.type === 'signal') {
+        handleSignal(msg.data);
+      }
+    };
+
+    document.getElementById('micBtn').disabled = false;
+    logMessage(\`وارد روم [\${room}] شدید.\`);
+  }
+
+  async function toggleMic() {
+    const btn = document.getElementById('micBtn');
+    if (!localStream) {
+      try {
+        localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+        btn.innerText = "🎙️ میکروفون: روشن";
+        btn.className = "btn btn-success";
+        initWebRTC();
+      } catch (err) {
+        alert("دسترسی به میکروفون داده نشد!");
+      }
+    } else {
+      localStream.getTracks().forEach(track => track.stop());
+      localStream = null;
+      if (peerConn) peerConn.close();
+      btn.innerText = "🎙️ میکروفون: خاموش";
+      btn.className = "btn btn-danger";
+    }
+  }
+
+  async function initWebRTC() {
+    peerConn = new RTCPeerConnection(rtcConfig);
+    localStream.getTracks().forEach(track => peerConn.addTrack(track, localStream));
+
+    peerConn.ontrack = (e) => {
+      let audio = document.getElementById('remoteAudio');
+      if (!audio) {
+        audio = new Audio();
+        audio.id = 'remoteAudio';
+        audio.autoplay = true;
+        document.body.appendChild(audio);
+      }
+      audio.srcObject = e.streams[0];
+    };
+
+    peerConn.onicecandidate = (e) => {
+      if (e.candidate) {
+        ws.send(JSON.stringify({ type: 'signal', data: { candidate: e.candidate } }));
+      }
+    };
+
+    const offer = await peerConn.createOffer();
+    await peerConn.setLocalDescription(offer);
+    ws.send(JSON.stringify({ type: 'signal', data: { sdp: offer } }));
+  }
+
+  async function handleSignal(data) {
+    if (!peerConn) initWebRTC();
+    if (data.sdp) {
+      await peerConn.setRemoteDescription(new RTCSessionDescription(data.sdp));
+      if (data.sdp.type === 'offer') {
+        const answer = await peerConn.createAnswer();
+        await peerConn.setLocalDescription(answer);
+        ws.send(JSON.stringify({ type: 'signal', data: { sdp: answer } }));
+      }
+    } else if (data.candidate) {
+      await peerConn.addIceCandidate(new RTCIceCandidate(data.candidate));
+    }
+  }
+
+  function sendQuick(text) {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'chat', text }));
+    }
+  }
+
+  function logMessage(txt) {
+    const log = document.getElementById('chat-log');
+    log.innerHTML += \`<div>• \${txt}</div>\`;
+    log.scrollTop = log.scrollHeight;
+  }
+</script>
+</body>
+</html>`;
