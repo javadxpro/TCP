@@ -2,41 +2,44 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
 
-    // ===== ۱. مانیفست PWA =====
-    if (url.pathname === '/manifest.json') {
-      const manifest = {
-        name: "GamingGram - chat & voice chat in game",
-        short_name: "GamingGram",
-        description: "A program for hassle-free chat and voice chat",
-        start_url: "https://tcp.javadxpro.workers.dev/",
-        display: "minimal-ui",
-        background_color: "#00145d",
-        theme_color: "#9f00b5",
-        icons: [
-          {
-            src: "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'><rect width='512' height='512' fill='%230f172a'/><text x='50%' y='50%' dominant-baseline='middle' text-anchor='middle' font-size='250' fill='%2338bdf8'>🎮</text></svg>",
-            sizes: "512x512",
-            type: "image/svg+xml"
+{
+  "name": "GamingGram - chat &amp; voice chat in game",
+  "short_name": "GamingGram",
+  "description": "A program for hassle-free chat and voice chat",
+  "start_url": "https://tcp.javadxpro.workers.dev/",
+  "display": "minimal-ui",
+  "background_color": "#00145d",
+  "theme_color": "#9f00b5",
+  "icons": [
+    {
+      "src": "https://raw.githubusercontent.com/javadxpro/XP_PROJECT/refs/heads/main/launchericon-144x144.png",
+      "sizes": "144x144",
+      "type": "image/svg+xml"
+    }
+  ],
+  "id": "XP.GamingGram.dev",
+  "lang": "en",
+  "orientation": "natural",
+  "display_override": [
+    "window-controls-overlay"
+  ],
+  "iarc_rating_id": "5",
+  "prefer_related_applications": true,
+  "categories": [
+    "games",
+    "network",
+    "personalization",
+    "social networking"
+  ]
           }
-        ],
-        id: "XP.GamingGram.dev",
-        lang: "en",
-        orientation: "natural",
-        display_override: ["window-controls-overlay"],
-        iarc_rating_id: "5",
-        prefer_related_applications: true,
-        categories: ["games", "network", "personalization", "social networking"]
+        ]
       };
-      
       return new Response(JSON.stringify(manifest), {
-        headers: { 
-          'Content-Type': 'application/json;charset=UTF-8',
-          'Cache-Control': 'public, max-age=3600'
-        },
+        headers: { 'content-type': 'application/json;charset=UTF-8' },
       });
     }
 
-    // ===== ۲. مسیر WebSocket =====
+    // ۲. مسیر اتصال WebSocket
     if (url.pathname === '/ws') {
       const roomId = url.searchParams.get('room') || 'default';
       const id = env.CHAT_ROOM.idFromName(roomId);
@@ -44,17 +47,12 @@ export default {
       return roomObject.fetch(request);
     }
 
-    // ===== ۳. سرو کردن HTML =====
+    // ۳. سرو کردن فرانت‌اند HTML
     return new Response(htmlContent, {
-      headers: { 
-        'Content-Type': 'text/html;charset=UTF-8',
-        'Cache-Control': 'public, max-age=3600'
-      },
+      headers: { 'content-type': 'text/html;charset=UTF-8' },
     });
   }
 };
-
-// ===== Durable Object برای اتاق چت =====
 
 export class ChatRoom {
   constructor(state, env) {
@@ -109,18 +107,13 @@ export class ChatRoom {
   }
 }
 
-// ===== HTML (با لینک Manifest) =====
-
 const htmlContent = `<!DOCTYPE html>
 <html lang="fa" dir="rtl">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="manifest" href="/manifest.json">
-  <meta name="theme-color" content="#9f00b5">
-  <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <title>🎮 GamingGram - چت و ویس گیمینگ</title>
+  <title>🎮 چت و ویس گیمینگ چندنفره</title>
   <style>
     * { box-sizing: border-box; font-family: system-ui, -apple-system, sans-serif; }
     body { background: #0f172a; color: #f8fafc; margin: 0; padding: 20px; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
