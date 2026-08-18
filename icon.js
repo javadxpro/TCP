@@ -1,0 +1,51 @@
+export default `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    <!-- iOS Squircle / Background Gradient -->
+    <linearGradient id="bg-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f172a"/>
+      <stop offset="50%" stop-color="#1e1b4b"/>
+      <stop offset="100%" stop-color="#3b0764"/>
+    </linearGradient>
+
+    <!-- Neon Controller Gradient -->
+    <linearGradient id="icon-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38bdf8"/>
+      <stop offset="100%" stop-color="#c084fc"/>
+    </linearGradient>
+
+    <!-- Subtle Glow Shadow -->
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#a855f7" flood-opacity="0.4"/>
+    </filter>
+  </defs>
+
+  <!-- iOS Icon Base Shape (Squircle Corners) -->
+  <rect width="512" height="512" rx="115" ry="115" fill="url(#bg-grad)"/>
+
+  <!-- Icon Graphic: Gaming Controller & Headset -->
+  <g filter="url(#glow)" transform="translate(0, 0)">
+    <!-- Headset Band -->
+    <path d="M140 240 C140 140, 372 140, 372 240" fill="none" stroke="url(#icon-grad)" stroke-width="20" stroke-linecap="round"/>
+    
+    <!-- Headset Earcups -->
+    <rect x="116" y="210" width="32" height="64" rx="16" fill="url(#icon-grad)"/>
+    <rect x="364" y="210" width="32" height="64" rx="16" fill="url(#icon-grad)"/>
+
+    <!-- Gamepad Body -->
+    <path d="M170 270 L342 270 C370 270, 385 295, 375 330 L360 380 C350 410, 320 415, 300 395 L275 370 L237 370 L212 395 C192 415, 162 410, 152 380 L137 330 C127 295, 142 270, 170 270 Z" 
+          fill="#1e293b" stroke="url(#icon-grad)" stroke-width="12" stroke-linejoin="round"/>
+
+    <!-- D-Pad (Left Side) -->
+    <path d="M190 310 V340 M175 325 H205" stroke="#38bdf8" stroke-width="10" stroke-linecap="round"/>
+
+    <!-- Action Buttons (Right Side) -->
+    <circle cx="315" cy="315" r="7" fill="#c084fc"/>
+    <circle cx="335" cy="330" r="7" fill="#38bdf8"/>
+    <circle cx="295" cy="330" r="7" fill="#38bdf8"/>
+    <circle cx="315" cy="345" r="7" fill="#c084fc"/>
+
+    <!-- Microphone Mic Boom -->
+    <path d="M132 260 C120 320, 150 365, 200 365" fill="none" stroke="#38bdf8" stroke-width="8" stroke-linecap="round"/>
+    <circle cx="205" cy="365" r="8" fill="#38bdf8"/>
+  </g>
+</svg>`;
