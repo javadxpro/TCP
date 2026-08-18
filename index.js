@@ -2,6 +2,30 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
 
+    // ۱. مسیریابی مانیفست PWA برای PWABuilder
+    if (url.pathname === '/manifest.json') {
+      const manifest = {
+        name: "Gaming Voice & Text Chat",
+        short_name: "GamingVoice",
+        description: "سیستم چت صوتی و متنی سبک و سریع برای بازی‌های آنلاین گروهی",
+        start_url: "/",
+        display: "standalone",
+        background_color: "#0f172a",
+        theme_color: "#0f172a",
+        icons: [
+          {
+            src: "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'><rect width='512' height='512' fill='%230f172a'/><text x='50%' y='50%' dominant-baseline='middle' text-anchor='middle' font-size='250' fill='%2338bdf8'>🎮</text></svg>",
+            sizes: "512x512",
+            type: "image/svg+xml"
+          }
+        ]
+      };
+      return new Response(JSON.stringify(manifest), {
+        headers: { 'content-type': 'application/json;charset=UTF-8' },
+      });
+    }
+
+    // ۲. مسیر اتصال WebSocket
     if (url.pathname === '/ws') {
       const roomId = url.searchParams.get('room') || 'default';
       const id = env.CHAT_ROOM.idFromName(roomId);
@@ -9,6 +33,7 @@ export default {
       return roomObject.fetch(request);
     }
 
+    // ۳. سرو کردن فرانت‌اند HTML
     return new Response(htmlContent, {
       headers: { 'content-type': 'text/html;charset=UTF-8' },
     });
@@ -73,7 +98,7 @@ const htmlContent = `<!DOCTYPE html>
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <link rel="rel" href="data:application/manifest+json;utf8,{%22name%22:%22Gaming%20Voice%22,%22short_name%22:%22Voice%22,%22start_url%22:%22/%22,%22display%22:%22standalone%22,%22background_color%22:%22#0f172a%22,%22theme_color%22:%22#0f172a%22}">
+  <link rel="manifest" href="/manifest.json">
   <title>🎮 چت و ویس گیمینگ چندنفره</title>
   <style>
     * { box-sizing: border-box; font-family: system-ui, -apple-system, sans-serif; }
@@ -137,9 +162,7 @@ const htmlContent = `<!DOCTYPE html>
 
 <script>
   let ws, localStream;
-  const peers = {}; // ذخیره اطلاعات RTCPeerConnection برای هر کاربر
-  
-  // سرورهای STUN متعدد برای عبور از فیلترینگ و NAT
+  const peers = {};
   const rtcConfig = {
     iceServers: [
       { urls: 'stun:stun.l.google.com:19302' },
@@ -274,7 +297,6 @@ const htmlContent = `<!DOCTYPE html>
         btn.innerText = "🎙️ میکروفون: روشن";
         btn.className = "btn-success";
 
-        // اضافه کردن ترک صدا به تمام اتصالات فعال و ارسال مجدد Offer
         Object.keys(peers).forEach(peerId => {
           const pc = peers[peerId].pc;
           localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
@@ -285,7 +307,7 @@ const htmlContent = `<!DOCTYPE html>
         });
 
       } catch (err) {
-        alert("خطا در دسترسی به میکروفون! مطمئن شوید مجوز (Permission) صادر شده است.");
+        alert("خطا در دسترسی به میکروفون!");
       }
     } else {
       localStream.getTracks().forEach(track => track.stop());
