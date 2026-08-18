@@ -8,8 +8,8 @@
   "theme_color": "#9f00b5",
   "icons": [
     {
-      "src": "data:image/svg+xml;utf8,&lt;svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'&gt;&lt;rect width='512' height='512' fill='%230f172a'/&gt;&lt;text x='50%' y='50%' dominant-baseline='middle' text-anchor='middle' font-size='250' fill='%2338bdf8'&gt;🎮&lt;/text&gt;&lt;/svg&gt;",
-      "sizes": "512x512",
+      "src": "https://raw.githubusercontent.com/javadxpro/XP_PROJECT/refs/heads/main/launchericon-144x144.png",
+      "sizes": "144x144",
       "type": "image/svg+xml"
     }
   ],
