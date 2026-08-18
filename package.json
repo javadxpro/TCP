@@ -1,0 +1,12 @@
+{
+  "name": "gaming-voice-chat",
+  "version": "1.0.0",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "^3.0.0"
+  }
+}

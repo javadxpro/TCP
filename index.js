@@ -1,40 +1,11 @@
+import manifest from './manifest.json';
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
 
-    // ۱. مسیر مانیفست PWA
+    // ۱. خواندن و ارسال فایل manifest.json
     if (url.pathname === '/manifest.json') {
-      const manifest = {
-        name: "GamingGram - chat & voice chat in game",
-        short_name: "GamingGram",
-        description: "A program for hassle-free chat and voice chat",
-        start_url: "https://tcp.javadxpro.workers.dev/",
-        display: "minimal-ui",
-        background_color: "#00145d",
-        theme_color: "#9f00b5",
-        icons: [
-          {
-            src: "https://raw.githubusercontent.com/javadxpro/XP_PROJECT/refs/heads/main/launchericon-144x144.png",
-            sizes: "144x144",
-            type: "image/png"
-          }
-        ],
-        id: "XP.GamingGram.dev",
-        lang: "en",
-        orientation: "natural",
-        display_override: [
-          "window-controls-overlay"
-        ],
-        iarc_rating_id: "5",
-        prefer_related_applications: true,
-        categories: [
-          "games",
-          "network",
-          "personalization",
-          "social networking"
-        ]
-      };
-
       return new Response(JSON.stringify(manifest), {
         headers: { 'content-type': 'application/json;charset=UTF-8' },
       });
