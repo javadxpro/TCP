@@ -2,7 +2,6 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
 
-    // مسیر اتصال WebSocket برای چت و سیگنالینگ صوتی
     if (url.pathname === '/ws') {
       const roomId = url.searchParams.get('room') || 'default';
       const id = env.CHAT_ROOM.idFromName(roomId);
@@ -10,14 +9,12 @@ export default {
       return roomObject.fetch(request);
     }
 
-    // سرو کردن فرانت‌اند HTML
     return new Response(htmlContent, {
       headers: { 'content-type': 'text/html;charset=UTF-8' },
     });
   }
 };
 
-// کلاس Durable Object برای مدیریت روم چندنفره
 export class ChatRoom {
   constructor(state, env) {
     this.state = state;
@@ -48,7 +45,6 @@ export class ChatRoom {
 
     data.sender = peerId;
 
-    // ارسال پیام/سیگنال به تمام اعضای حاضر در روم (به جز فرستنده)
     for (const socket of this.state.getWebSockets()) {
       if (socket !== ws) {
         try {
@@ -72,7 +68,6 @@ export class ChatRoom {
   }
 }
 
-// فرانت‌اند پروژه
 const htmlContent = `<!DOCTYPE html>
 <html lang="fa" dir="rtl">
 <head>
@@ -104,17 +99,15 @@ const htmlContent = `<!DOCTYPE html>
 </head>
 <body>
 
-<div class="card">
+<div class="card" onclick="enableAudioPlayback()">
   <h2>🎮 چت و ویس گیمینگ</h2>
 
-  <!-- فرم ورود -->
   <div id="join-form" class="flex">
     <input id="username" placeholder="نام شما" value="بازیکن ۱">
     <input id="room" placeholder="روم" value="team1" style="max-width: 100px;">
     <button onclick="connect()">ورود</button>
   </div>
 
-  <!-- پنل چت و ویس -->
   <div id="room-panel" style="display: none;">
     <div class="flex" style="justify-content: space-between;">
       <button id="mic-btn" class="btn-danger" onclick="toggleMic()">🎙️ میکروفون: خاموش</button>
@@ -139,14 +132,28 @@ const htmlContent = `<!DOCTYPE html>
   </div>
 </div>
 
-<div id="audio-container" style="display:none;"></div>
+<div id="audio-container"></div>
 
 <script>
   let ws, localStream;
-  const peers = {}; // نگهداری اتصال کانکشن به بقیه بازیکنان
-  const rtcConfig = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+  const peers = {}; // ذخیره اطلاعات RTCPeerConnection برای هر کاربر
+  
+  // سرورهای STUN متعدد برای عبور از فیلترینگ و NAT
+  const rtcConfig = {
+    iceServers: [
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:stun1.l.google.com:19302' },
+      { urls: 'stun:stun.services.mozilla.com' }
+    ]
+  };
+
+  function enableAudioPlayback() {
+    const audios = document.querySelectorAll('audio');
+    audios.forEach(a => a.play().catch(() => {}));
+  }
 
   function connect() {
+    enableAudioPlayback();
     const username = document.getElementById('username').value.trim() || 'بازیکن';
     const room = document.getElementById('room').value.trim() || 'default';
     document.getElementById('my-name').innerText = username;
@@ -175,13 +182,14 @@ const htmlContent = `<!DOCTYPE html>
     switch (msg.type) {
       case 'join':
         addSystemMsg(\`\${msg.name} وارد شد.\`);
-        ws.send(JSON.stringify({ type: 'welcome', target: sender, name: document.getElementById('username').value }));
+        ws.send(JSON.stringify({ type: 'welcome', name: document.getElementById('username').value }));
         updatePeerList(sender, msg.name);
-        if (localStream) createPeerConnection(sender, msg.name, true);
+        initPeerConnection(sender, msg.name, true);
         break;
 
       case 'welcome':
         updatePeerList(sender, msg.name);
+        initPeerConnection(sender, msg.name, false);
         break;
 
       case 'chat':
@@ -189,7 +197,7 @@ const htmlContent = `<!DOCTYPE html>
         break;
 
       case 'offer':
-        const pc = createPeerConnection(sender, msg.name, false);
+        const pc = initPeerConnection(sender, msg.name, false);
         await pc.setRemoteDescription(new RTCSessionDescription(msg.sdp));
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
@@ -214,7 +222,7 @@ const htmlContent = `<!DOCTYPE html>
     }
   }
 
-  function createPeerConnection(peerId, peerName, isInitiator) {
+  function initPeerConnection(peerId, peerName, isInitiator) {
     if (peers[peerId]?.pc) return peers[peerId].pc;
 
     const pc = new RTCPeerConnection(rtcConfig);
@@ -230,9 +238,11 @@ const htmlContent = `<!DOCTYPE html>
         audioEl = document.createElement('audio');
         audioEl.id = \`audio-\${peerId}\`;
         audioEl.autoplay = true;
+        audioEl.playsInline = true;
         document.getElementById('audio-container').appendChild(audioEl);
       }
       audioEl.srcObject = event.streams[0];
+      audioEl.play().catch(e => console.log("Autoplay check:", e));
     };
 
     pc.onicecandidate = (event) => {
@@ -252,26 +262,35 @@ const htmlContent = `<!DOCTYPE html>
   }
 
   async function toggleMic() {
+    enableAudioPlayback();
     const btn = document.getElementById('mic-btn');
+
     if (!localStream) {
       try {
-        localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+        localStream = await navigator.mediaDevices.getUserMedia({ 
+          audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } 
+        });
         btn.innerText = "🎙️ میکروفون: روشن";
         btn.className = "btn-success";
-        Object.keys(peers).forEach(peerId => createPeerConnection(peerId, peers[peerId].name, true));
+
+        // اضافه کردن ترک صدا به تمام اتصالات فعال و ارسال مجدد Offer
+        Object.keys(peers).forEach(peerId => {
+          const pc = peers[peerId].pc;
+          localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+          pc.createOffer().then(offer => {
+            pc.setLocalDescription(offer);
+            ws.send(JSON.stringify({ type: 'offer', target: peerId, sdp: offer, name: document.getElementById('username').value }));
+          });
+        });
+
       } catch (err) {
-        alert("خطا در دسترسی به میکروفون!");
+        alert("خطا در دسترسی به میکروفون! مطمئن شوید مجوز (Permission) صادر شده است.");
       }
     } else {
       localStream.getTracks().forEach(track => track.stop());
       localStream = null;
       btn.innerText = "🎙️ میکروفون: خاموش";
       btn.className = "btn-danger";
-      Object.keys(peers).forEach(peerId => {
-        if (peers[peerId].pc) peers[peerId].pc.close();
-        delete peers[peerId];
-      });
-      document.getElementById('audio-container').innerHTML = '';
     }
   }
 
