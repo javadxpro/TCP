@@ -1,6 +1,8 @@
-// ==================== ChatGram - Cloudflare Worker ====================
+// ==================== چتگرام - چت و گفتگوی گروهی ====================
 
 let chatClients = new Set();
+
+// ===== Durable Object برای گفتگوی گروهی (صوتی) =====
 
 export class VoiceRoom {
   constructor(state, env) {
@@ -23,6 +25,7 @@ export class VoiceRoom {
       server.addEventListener("message", (event) => {
         try {
           const data = JSON.parse(event.data);
+          // پخش صدا به همه در اتاق
           for (const client of this.clients) {
             if (client !== server && client.readyState === 1) {
               client.send(JSON.stringify({
@@ -50,15 +53,29 @@ export class VoiceRoom {
   }
 }
 
+// ===== Worker اصلی =====
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     const path = url.pathname;
 
+    // ===== دریافت پیام‌های چت از KV =====
+    if (path === '/api/messages' && request.method === 'GET') {
+      try {
+        const messages = await env.VL_DB.get('messages', 'json') || [];
+        return Response.json(messages.slice(-200));
+      } catch (e) {
+        return Response.json([]);
+      }
+    }
+
+    // ===== دریافت تعداد آنلاین =====
     if (path === '/api/online' && request.method === 'GET') {
       return Response.json({ count: chatClients.size + 1 });
     }
 
+    // ===== WebSocket چت گروهی (متن) =====
     if (path === '/ws/chat') {
       const upgrade = request.headers.get("Upgrade");
       if (!upgrade || upgrade !== "websocket") {
@@ -75,20 +92,25 @@ export default {
         try {
           const data = JSON.parse(event.data);
 
-          if (data.type === 'welcome') {
-            for (const client of chatClients) {
-              if (client.readyState === 1) {
-                client.send(JSON.stringify(data));
-              }
-            }
-            return;
+          // ذخیره در KV
+          const messages = await env.VL_DB.get('messages', 'json') || [];
+          const newMsg = {
+            id: Date.now(),
+            sender: data.sender || 'ناشناس',
+            text: data.text || '',
+            timestamp: data.timestamp || new Date().toISOString(),
+            type: 'group'
+          };
+          messages.push(newMsg);
+          if (messages.length > 500) {
+            messages.splice(0, messages.length - 500);
           }
+          await env.VL_DB.put('messages', JSON.stringify(messages));
 
-          if (data.type === 'message') {
-            for (const client of chatClients) {
-              if (client !== server && client.readyState === 1) {
-                client.send(JSON.stringify(data));
-              }
+          // پخش به همه
+          for (const client of chatClients) {
+            if (client.readyState === 1) {
+              client.send(JSON.stringify(newMsg));
             }
           }
         } catch (e) {
@@ -106,6 +128,7 @@ export default {
       });
     }
 
+    // ===== WebSocket گفتگوی گروهی (صوتی) =====
     if (path.startsWith('/ws/voice/')) {
       const roomId = path.split('/')[3] || 'default';
       const upgrade = request.headers.get("Upgrade");
@@ -118,6 +141,7 @@ export default {
       return obj.fetch(request);
     }
 
+    // ===== صفحات HTML/CSS/JS =====
     if (path === '/' || path === '/index.html') {
       return new Response(await getIndexHTML(), {
         headers: { 'Content-Type': 'text/html; charset=utf-8' }
@@ -154,26 +178,27 @@ async function getIndexHTML() {
 <body>
     <header>
         <h1>💬 چتگرام</h1>
-        <span id="onlineCount">👤 ۰ آنلاین</span>
+        <div class="header-info">
+            <span id="onlineCount">👤 ۰ آنلاین</span>
+            <button id="voiceBtn" onclick="toggleVoice()">🎙️ گفتگوی گروهی</button>
+        </div>
     </header>
     
     <main>
         <div class="chat-container">
             <div class="messages" id="messagesContainer">
                 <div class="message received">
-                    <span class="sender">ربات</span>
-                    👋 به چتگرام خوش آمدید! پیام بنویسید.
+                    <span class="sender">🤖 ربات</span>
+                    به چت و گفتگوی گروهی خوش آمدید!
                     <span class="time">همین الان</span>
                 </div>
             </div>
             <div class="input-area">
-                <input type="text" id="messageInput" placeholder="پیام بنویسید..." onkeypress="if(event.key==='Enter') sendMessage()">
-                <button id="sendBtn" onclick="sendMessage()">📤</button>
+                <input type="text" id="messageInput" placeholder="پیام گروهی..." onkeypress="if(event.key==='Enter') sendMessage()">
+                <button onclick="sendMessage()">📤</button>
             </div>
         </div>
     </main>
-
-    <button id="bigVoiceBtn" onclick="toggleVoice()">🎙️ اتصال صوتی</button>
 
     <script src="/script.js"></script>
 </body>
@@ -217,9 +242,35 @@ header h1 {
   -webkit-text-fill-color: transparent;
 }
 
+.header-info {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
 #onlineCount {
   font-size: 13px;
   color: #A0A0C0;
+}
+
+#voiceBtn {
+  background: #5B4B8A;
+  color: white;
+  border: none;
+  padding: 6px 16px;
+  border-radius: 20px;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 13px;
+  transition: all 0.3s;
+}
+
+#voiceBtn:hover {
+  background: #7B6BAA;
+}
+
+#voiceBtn.active {
+  background: #EF4444;
 }
 
 main {
@@ -326,7 +377,7 @@ main {
   color: #666;
 }
 
-#sendBtn {
+.input-area button {
   width: 44px;
   height: 44px;
   border: none;
@@ -341,51 +392,8 @@ main {
   justify-content: center;
 }
 
-#sendBtn:hover {
+.input-area button:hover {
   background: #7B6BAA;
-}
-
-#bigVoiceBtn {
-  position: fixed;
-  bottom: 80px;
-  left: 50%;
-  transform: translateX(-50%);
-  background: #5B4B8A;
-  color: white;
-  border: none;
-  padding: 16px 40px;
-  border-radius: 50px;
-  font-size: 20px;
-  font-weight: 700;
-  cursor: pointer;
-  box-shadow: 0 8px 32px rgba(91, 75, 138, 0.5);
-  z-index: 999;
-  transition: all 0.3s;
-  min-width: 200px;
-  text-align: center;
-}
-
-#bigVoiceBtn:hover {
-  transform: translateX(-50%) scale(1.05);
-  background: #7B6BAA;
-}
-
-#bigVoiceBtn.active {
-  background: #EF4444;
-  box-shadow: 0 8px 32px rgba(239, 68, 68, 0.5);
-}
-
-#bigVoiceBtn.active:hover {
-  background: #DC2626;
-}
-
-@media (max-width: 768px) {
-  #bigVoiceBtn {
-    bottom: 60px;
-    padding: 12px 24px;
-    font-size: 16px;
-    min-width: 150px;
-  }
 }
 
 ::-webkit-scrollbar {
@@ -405,14 +413,18 @@ main {
 // ==================== JavaScript ====================
 
 async function getScriptJS() {
-  return `let ws = null;
+  return `// ====== چتگرام - چت و گفتگوی گروهی ======
+
+let ws = null;
 let voiceWs = null;
 let voiceStream = null;
-let username = prompt('نام خود را وارد کنید:', 'کاربر') || 'ناشناس';
+let username = prompt('نام خود را وارد کنید:', 'کاربر') || 'کاربر';
 let isVoiceConnected = false;
 let reconnectAttempts = 0;
 let audioContext = null;
 let processor = null;
+
+// ===== اتصال به چت گروهی =====
 
 function connectChat() {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -421,14 +433,9 @@ function connectChat() {
   ws = new WebSocket(\`\${protocol}//\${host}/ws/chat\`);
   
   ws.onopen = () => {
-    console.log('✅ چت متصل شد');
+    console.log('✅ به چت گروهی متصل شد');
     reconnectAttempts = 0;
-    ws.send(JSON.stringify({
-      type: 'welcome',
-      sender: 'ربات',
-      text: \`👋 \${username} به چتگرام خوش آمدید!\`,
-      timestamp: new Date().toISOString()
-    }));
+    loadMessages();
   };
   
   ws.onmessage = (event) => {
@@ -441,19 +448,46 @@ function connectChat() {
   };
   
   ws.onclose = () => {
-    console.log('❌ چت قطع شد، تلاش مجدد...');
+    console.log('❌ اتصال قطع شد، تلاش مجدد...');
     reconnectAttempts++;
     setTimeout(connectChat, Math.min(3000 * reconnectAttempts, 30000));
   };
 }
 
+// ===== بارگذاری پیام‌های قبلی =====
+
+function loadMessages() {
+  fetch('/api/messages')
+    .then(res => res.json())
+    .then(messages => {
+      const container = document.getElementById('messagesContainer');
+      container.innerHTML = '';
+      if (messages.length === 0) {
+        const welcome = {
+          sender: '🤖 ربات',
+          text: 'به چت و گفتگوی گروهی خوش آمدید!',
+          timestamp: new Date().toISOString()
+        };
+        appendMessage(welcome);
+      } else {
+        messages.forEach(appendMessage);
+      }
+    })
+    .catch(() => {});
+}
+
+// ===== ارسال پیام =====
+
 function sendMessage() {
   const input = document.getElementById('messageInput');
   const text = input.value.trim();
-  if (!text || !ws || ws.readyState !== 1) return;
+  if (!text) return;
+  if (!ws || ws.readyState !== 1) {
+    alert('❌ اتصال به سرور برقرار نیست');
+    return;
+  }
   
   ws.send(JSON.stringify({
-    type: 'message',
     sender: username,
     text: text,
     timestamp: new Date().toISOString()
@@ -461,6 +495,8 @@ function sendMessage() {
   
   input.value = '';
 }
+
+// ===== نمایش پیام =====
 
 function appendMessage(msg) {
   const container = document.getElementById('messagesContainer');
@@ -480,6 +516,8 @@ function appendMessage(msg) {
   container.scrollTop = container.scrollHeight;
 }
 
+// ===== تعداد آنلاین =====
+
 function updateOnlineCount() {
   fetch('/api/online')
     .then(res => res.json())
@@ -489,10 +527,13 @@ function updateOnlineCount() {
     .catch(() => {});
 }
 
+// ===== گفتگوی گروهی (صوتی) =====
+
 async function toggleVoice() {
-  const btn = document.getElementById('bigVoiceBtn');
+  const btn = document.getElementById('voiceBtn');
   
   if (isVoiceConnected) {
+    // قطع اتصال صوتی
     if (voiceWs) voiceWs.close();
     if (voiceStream) {
       voiceStream.getTracks().forEach(track => track.stop());
@@ -507,11 +548,12 @@ async function toggleVoice() {
       audioContext = null;
     }
     isVoiceConnected = false;
-    btn.textContent = '🎙️ اتصال صوتی';
+    btn.textContent = '🎙️ گفتگوی گروهی';
     btn.classList.remove('active');
     return;
   }
   
+  // اتصال صوتی
   try {
     voiceStream = await navigator.mediaDevices.getUserMedia({ 
       audio: { echoCancellation: true, noiseSuppression: true }
@@ -524,7 +566,7 @@ async function toggleVoice() {
     
     voiceWs.onopen = () => {
       isVoiceConnected = true;
-      btn.textContent = '🔴 قطع صوتی';
+      btn.textContent = '🔴 قطع گفتگو';
       btn.classList.add('active');
       
       audioContext = new (window.AudioContext || window.webkitAudioContext)();
@@ -580,7 +622,7 @@ async function toggleVoice() {
     voiceWs.onclose = () => {
       if (isVoiceConnected) {
         isVoiceConnected = false;
-        btn.textContent = '🎙️ اتصال صوتی';
+        btn.textContent = '🎙️ گفتگوی گروهی';
         btn.classList.remove('active');
       }
     };
@@ -591,7 +633,16 @@ async function toggleVoice() {
   }
 }
 
+// ===== شروع =====
+
 connectChat();
 updateOnlineCount();
-setInterval(updateOnlineCount, 15000);`;
+setInterval(updateOnlineCount, 15000);
+
+document.addEventListener('DOMContentLoaded', () => {
+  const input = document.getElementById('messageInput');
+  input.addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') sendMessage();
+  });
+});`;
 }
