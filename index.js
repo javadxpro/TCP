@@ -2,21 +2,35 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
 
-    // ۱. مسیریابی مانیفست PWA برای PWABuilder
-    if (url.pathname === '/manifest.json') {
-      const manifest = {
-        name: "Gaming Voice & Text Chat",
-        short_name: "GamingVoice",
-        description: "سیستم چت صوتی و متنی سبک و سریع برای بازی‌های آنلاین گروهی",
-        start_url: "/",
-        display: "standalone",
-        background_color: "#0f172a",
-        theme_color: "#0f172a",
-        icons: [
-          {
-            src: "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'><rect width='512' height='512' fill='%230f172a'/><text x='50%' y='50%' dominant-baseline='middle' text-anchor='middle' font-size='250' fill='%2338bdf8'>🎮</text></svg>",
-            sizes: "512x512",
-            type: "image/svg+xml"
+{
+  "name": "GamingGram - chat &amp; voice chat in game",
+  "short_name": "GamingGram",
+  "description": "A program for hassle-free chat and voice chat",
+  "start_url": "https://tcp.javadxpro.workers.dev/",
+  "display": "minimal-ui",
+  "background_color": "#00145d",
+  "theme_color": "#9f00b5",
+  "icons": [
+    {
+      "src": "data:image/svg+xml;utf8,&lt;svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'&gt;&lt;rect width='512' height='512' fill='%230f172a'/&gt;&lt;text x='50%' y='50%' dominant-baseline='middle' text-anchor='middle' font-size='250' fill='%2338bdf8'&gt;🎮&lt;/text&gt;&lt;/svg&gt;",
+      "sizes": "512x512",
+      "type": "image/svg+xml"
+    }
+  ],
+  "id": "XP.GamingGram.dev",
+  "lang": "en",
+  "orientation": "natural",
+  "display_override": [
+    "window-controls-overlay"
+  ],
+  "iarc_rating_id": "5",
+  "prefer_related_applications": true,
+  "categories": [
+    "games",
+    "network",
+    "personalization",
+    "social networking"
+  ]
           }
         ]
       };
