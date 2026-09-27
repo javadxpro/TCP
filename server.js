@@ -191,19 +191,54 @@ function lanAddresses() {
   return out;
 }
 
-server.listen(PORT, HOST, () => {
-  console.log('\n🎮 سرور سیگنالینگ چت صوتی روشن شد');
-  console.log('──────────────────────────────────────');
-  const ips = lanAddresses();
-  if (ips.length === 0) console.log(`  http://127.0.0.1:${PORT}`);
-  for (const { name, ip } of ips) console.log(`  📋 آدرس برای بچه‌ها:  ${ip}:${PORT}   (${name})`);
-  console.log('──────────────────────────────────────');
-  console.log('  • در اپ: آدرس بالا را کپی کنید تا خودکار پر شود.');
-  console.log(`  • در مرورگر (همان وای‌فای): http://<IP>:${PORT}`);
-  console.log('  • برای توقف: Ctrl+C\n');
+let port = PORT;
+const AUTO_PORT = !process.env.PORT_STRICT;   // اگر پورت اشغال بود، پورت بعدی را امتحان کن
+
+server.on('error', async (err) => {
+  if (err.code !== 'EADDRINUSE') { console.error('خطای سرور:', err.message); process.exit(1); }
+  // آیا همین سرور قبلاً روی این پورت اجرا شده؟
+  try {
+    const r = await fetch(`http://127.0.0.1:${port}/health`, { signal: AbortSignal.timeout(1500) });
+    const j = await r.json();
+    if (j && j.ok) {
+      console.log(`\n✅ سرور از قبل روی پورت ${port} روشن است (${j.peers} نفر متصل). نیازی به اجرای دوباره نیست.`);
+      printAddresses(port);
+      console.log('برای بستن نسخه قبلی:  pkill -f "node server.js"\n');
+      process.exit(3);
+    }
+  } catch { /* برنامه دیگری پورت را گرفته */ }
+  if (AUTO_PORT && port < PORT + 10) {
+    console.log(`⚠️ پورت ${port} را برنامه دیگری گرفته؛ امتحان پورت ${port + 1}...`);
+    port += 1;
+    setTimeout(() => server.listen(port, HOST), 200);
+  } else {
+    console.error(`❌ پورت ${port} اشغال است. پورت دیگری بدهید:  PORT=3000 node server.js`);
+    process.exit(2);
+  }
 });
 
-process.on('SIGINT', () => {
+function printAddresses(p) {
+  console.log('──────────────────────────────────────');
+  const ips = lanAddresses();
+  if (ips.length === 0) console.log(`  http://127.0.0.1:${p}`);
+  for (const { name, ip } of ips) console.log(`  📋 آدرس برای بچه‌ها:  ${ip}:${p}   (${name})`);
+  console.log('──────────────────────────────────────');
+}
+
+server.on('listening', () => {
+  console.log('\n🎮 سرور سیگنالینگ چت صوتی روشن شد');
+  printAddresses(port);
+  console.log('  • در اپ: آدرس بالا را کپی کنید تا خودکار پر شود.');
+  console.log(`  • در مرورگر (همان وای‌فای): http://<IP>:${port}`);
+  console.log('  • برای توقف: Ctrl+C\n');
+  if (process.env.PORT_FILE) { try { fs.writeFileSync(process.env.PORT_FILE, String(port)); } catch {} }
+});
+
+server.listen(port, HOST);
+
+const shutdown = () => {
   console.log(`\nخاموش شد. مصرف کل سیگنالینگ: ${(totalBytes / 1024).toFixed(1)} KB`);
   process.exit(0);
-});
+};
+process.on('SIGINT', shutdown);
+process.on('SIGTERM', shutdown);
