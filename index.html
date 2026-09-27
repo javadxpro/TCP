@@ -111,6 +111,7 @@
     .server-row { display: flex; gap: 8px; align-items: stretch; }
     .server-row .input-field { flex: 1; min-width: 0; text-align: left; }
     .paste-btn { flex: 0 0 auto; width: auto; padding: 0 14px; white-space: nowrap; margin: 0; }
+    .input-field.flash { box-shadow: 0 0 0 3px rgba(34,197,94,.6); transition: box-shadow .3s; }
     .server-hint { color: var(--text-muted); font-size: 11px; display: block; margin-top: 6px; }
 
     /* In-room Topbar */
@@ -279,7 +280,7 @@
           <input id="custom-server" class="input-field" dir="ltr" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="192.168.1.5:8080">
           <button type="button" class="btn btn-secondary paste-btn" onclick="pasteServer()">📋 پیست</button>
         </div>
-        <small class="server-hint">آدرسی که میزبان فرستاده را پیست کنید یا دستی بنویسید.</small>
+        <small class="server-hint">اگر آدرس را کپی کرده باشید، خودکار پر می‌شود؛ وگرنه «پیست» بزنید یا دستی بنویسید.</small>
       </div>
 
       <button type="submit" class="btn btn-primary">
@@ -409,22 +410,53 @@
     location.reload();
   }
 
-  // دکمه پیست آدرس سرور
-  async function pasteServer() {
-    const input = document.getElementById('custom-server');
-    try {
-      const text = (await navigator.clipboard.readText() || '').trim();
-      if (!text) throw new Error('empty');
-      // اگر متن کامل پیام بود، اولین آدرس/IP داخلش را بردار
-      const m = text.match(/(?:wss?:\/\/|https?:\/\/)?[a-z0-9.-]+\.[a-z0-9.-]+(?::\d{2,5})?/i);
-      input.value = m ? m[0] : text;
-      showToast('آدرس سرور پیست شد ✅');
-    } catch (e) {
-      input.focus();
-      input.select();
-      showToast('پیست خودکار ممکن نشد؛ انگشت را روی کادر نگه دارید و Paste بزنید.');
-    }
+  // --- گرفتن آدرس سرور از کلیپ‌بورد ---
+  const SERVER_RE = /(?:wss?:\/\/|https?:\/\/)?(?:\d{1,3}(?:\.\d{1,3}){3}|[a-z0-9-]+(?:\.[a-z0-9-]+)+)(?::\d{2,5})?/i;
+  function extractServer(text) {
+    const m = (text || '').trim().match(SERVER_RE);
+    return m ? m[0] : '';
   }
+  async function readClipboardText() {
+    const svc = nativeVoiceService();
+    if (svc && svc.readClipboard) {
+      try { return (await svc.readClipboard()).text || ''; } catch (e) {}
+    }
+    if (navigator.clipboard && navigator.clipboard.readText) {
+      return await navigator.clipboard.readText();
+    }
+    throw new Error('no clipboard');
+  }
+  // silent=true: تلاش خودکار هنگام باز شدن؛ فقط اگر آدرس جدیدی در کلیپ‌بورد بود پر می‌کند
+  async function autoFillServerFromClipboard(silent) {
+    const input = document.getElementById('custom-server');
+    let text;
+    try { text = await readClipboardText(); } catch (e) {
+      if (!silent) { input.focus(); input.select(); showToast('پیست خودکار ممکن نشد؛ انگشت را روی کادر نگه دارید و Paste بزنید.'); }
+      return false;
+    }
+    const srv = extractServer(text);
+    const looksLikeServer = /^(wss?:\/\/|\d{1,3}(\.\d{1,3}){3})|:\d{2,5}$|workers\.dev/i.test(srv);
+    if (silent && !looksLikeServer) return false;
+    if (!srv) { if (!silent) showToast('در کلیپ‌بورد آدرس سروری پیدا نشد.'); return false; }
+    if (srv === input.value.trim()) { if (!silent) showToast('همین آدرس از قبل وارد شده ✅'); return true; }
+    input.value = srv;
+    localStorage.setItem('signal_server', srv);
+    input.classList.add('flash');
+    setTimeout(() => input.classList.remove('flash'), 1200);
+    showToast('📋 آدرس سرور از کلیپ‌بورد گرفته شد: ' + srv);
+    return true;
+  }
+  function pasteServer() { return autoFillServerFromClipboard(false); }
+
+  // اجرای خودکار: هنگام باز شدن و هر بار برگشت به اپ/تب (فقط وقتی هنوز وارد اتاق نشده)
+  function inLobby() {
+    const r = document.getElementById('room-section');
+    return !r || r.style.display === 'none';
+  }
+  function tryAutoPaste() { if (inLobby()) autoFillServerFromClipboard(true); }
+  window.addEventListener('load', () => setTimeout(tryAutoPaste, 400));
+  window.addEventListener('focus', tryAutoPaste);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) setTimeout(tryAutoPaste, 300); });
 
   function getWsUrl(room) {
     const customServerInput = document.getElementById('custom-server');

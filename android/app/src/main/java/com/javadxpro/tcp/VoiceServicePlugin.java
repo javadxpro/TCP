@@ -1,6 +1,9 @@
 package com.javadxpro.tcp;
 
 import android.Manifest;
+import android.content.ClipData;
+import android.content.ClipboardManager;
+import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.os.Build;
@@ -36,6 +39,27 @@ public class VoiceServicePlugin extends Plugin {
         JSObject ret = new JSObject();
         ret.put("running", true);
         call.resolve(ret);
+    }
+
+    /** خواندن متن کلیپ‌بورد (اپ باید در پیش‌زمینه و فوکوس باشد) */
+    @PluginMethod
+    public void readClipboard(PluginCall call) {
+        getActivity().runOnUiThread(() -> {
+            String text = "";
+            try {
+                ClipboardManager cm = (ClipboardManager) getContext().getSystemService(Context.CLIPBOARD_SERVICE);
+                if (cm != null && cm.hasPrimaryClip()) {
+                    ClipData clip = cm.getPrimaryClip();
+                    if (clip != null && clip.getItemCount() > 0) {
+                        CharSequence cs = clip.getItemAt(0).coerceToText(getContext());
+                        if (cs != null) text = cs.toString();
+                    }
+                }
+            } catch (Exception ignored) { }
+            JSObject ret = new JSObject();
+            ret.put("text", text);
+            call.resolve(ret);
+        });
     }
 
     @PluginMethod
