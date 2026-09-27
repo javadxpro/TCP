@@ -1,0 +1,21 @@
+name: Inspect tool zip
+on:
+  push:
+    tags: [ "inspect-*" ]
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - env: { GH_TOKEN: "${{ github.token }}" }
+        run: |
+          gh release download E -R ${{ github.repository }} -p mphos-rebuild-tool.zip
+          unzip -l mphos-rebuild-tool.zip > list.txt
+          echo "::notice title=total::$(tail -1 list.txt)"
+          awk 'NR>3 && $4!=""{print $4}' list.txt | cut -d/ -f1-3 | sort -u > top.txt
+          echo "::notice title=count::$(wc -l < top.txt) entries (depth 3)"
+          split -l 15 top.txt part_
+          for f in part_*; do echo "::notice title=$f::$(paste -sd'|' $f)"; done
+          for r in README readme .txt .md; do :; done
+          f=$(awk 'NR>3{print $4}' list.txt | grep -iE '(^|/)readme[^/]*$' | head -1)
+          if [ -n "$f" ]; then unzip -p mphos-rebuild-tool.zip "$f" | head -c 3000 | tr '\n' '|' | sed 's/^/::notice title=readme::/'; echo; fi
