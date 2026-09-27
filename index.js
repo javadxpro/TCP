@@ -19,22 +19,26 @@ export default {
       });
     }
 
-    // ۳. مسیر اتصال WebSocket
+    // ۳. مسیر اتصال WebSocket برای چت و سیگنالینگ WebRTC
     if (url.pathname === '/ws') {
-      const roomId = url.searchParams.get('room') || 'default';
+      // اتاق پیش‌فرض "public" (اتاق عمومی گیمرها) است
+      const rawRoom = url.searchParams.get('room');
+      const roomId = (rawRoom && rawRoom.trim()) ? rawRoom.trim().toLowerCase() : 'public';
       const id = env.CHAT_ROOM.idFromName(roomId);
       const roomObject = env.CHAT_ROOM.get(id);
       return roomObject.fetch(request);
     }
 
-    // ۴. سرو کردن فرانت‌اند اصلی
+    // ۴. سرو کردن رابط کاربری اصلی فرانت‌اند
     return new Response(htmlContent, {
       headers: { 'content-type': 'text/html;charset=UTF-8' },
     });
   }
 };
 
-// --- کلاس مدیریت روم‌ها (Durable Object) ---
+// ==========================================
+// کلاس مدیریت روم‌ها (Cloudflare Durable Object)
+// ==========================================
 export class ChatRoom {
   constructor(state, env) {
     this.state = state;
@@ -42,14 +46,18 @@ export class ChatRoom {
 
   async fetch(request) {
     if (request.headers.get('Upgrade') !== 'websocket') {
-      return new Response('Expected WebSocket', { status: 426 });
+      return new Response('Expected WebSocket upgrade', { status: 426 });
     }
 
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair);
 
-    const peerId = 'user_' + Math.random().toString(36).substring(2, 7);
+    // ایجاد یک شناسه یکتا برای کلاینت جدید
+    const peerId = 'p_' + Math.random().toString(36).substring(2, 9);
     this.state.acceptWebSocket(server, [peerId]);
+
+    // ارسال بلافاصله شناسه اختصاصی به کاربر متصل‌شده
+    server.send(JSON.stringify({ type: 'init', peerId }));
 
     return new Response(null, { status: 101, webSocket: client });
   }
@@ -61,16 +69,29 @@ export class ChatRoom {
     let data;
     try {
       data = JSON.parse(message);
-    } catch(e) { return; }
+    } catch (e) {
+      return;
+    }
 
+    // ثبت فرستنده پیام به عنوان شناسه امن سروری
     data.sender = peerId;
 
-    // ارسال پیام برای بقیه اعضای روم
-    for (const socket of this.state.getWebSockets()) {
-      if (socket !== ws) {
+    // ۱. اگر پیام برای فرد خاصی باشد (نظیر offer, answer, ice, welcome)
+    if (data.target) {
+      const targetSockets = this.state.getWebSockets(data.target);
+      for (const socket of targetSockets) {
         try {
           socket.send(JSON.stringify(data));
         } catch (e) {}
+      }
+    } else {
+      // ۲. پیام‌های عمومی برای همه اعضای اتاق به جز خود فرستنده (نظیر join, chat, mute-status)
+      for (const socket of this.state.getWebSockets()) {
+        if (socket !== ws) {
+          try {
+            socket.send(JSON.stringify(data));
+          } catch (e) {}
+        }
       }
     }
   }
@@ -79,6 +100,7 @@ export class ChatRoom {
     const tags = this.state.getTags(ws);
     const peerId = tags[0];
 
+    // اطلاع‌رسانی خروج کاربر به تمام حاضرین اتاق
     for (const socket of this.state.getWebSockets()) {
       if (socket !== ws) {
         try {
@@ -89,291 +111,7 @@ export class ChatRoom {
   }
 }
 
-// --- کد فرانت‌اند HTML/CSS/JS ---
-const htmlContent = `<!DOCTYPE html>
-<html lang="fa" dir="rtl">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="theme-color" content="#0f172a">
-  <link rel="manifest" href="/manifest.json">
-  <link rel="icon" type="image/svg+xml" href="/icon.svg">
-  <title>🎮 چت و ویس گیمینگ چندنفره</title>
-  <style>
-    * { box-sizing: border-box; font-family: system-ui, -apple-system, sans-serif; }
-    body { background: #0f172a; color: #f8fafc; margin: 0; padding: 20px; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
-    .card { width: 100%; max-width: 500px; background: #1e293b; padding: 20px; border-radius: 14px; box-shadow: 0 8px 20px rgba(0,0,0,0.4); }
-    h2 { text-align: center; margin-top: 0; color: #38bdf8; font-size: 20px; display: flex; align-items: center; justify-content: center; gap: 8px; }
-    .flex { display: flex; gap: 8px; margin-bottom: 12px; }
-    input, button { padding: 10px 14px; border-radius: 8px; border: 1px solid #334155; font-size: 14px; outline: none; }
-    input { background: #0f172a; color: #fff; flex: 1; }
-    button { background: #2563eb; color: #fff; border: none; cursor: pointer; font-weight: bold; }
-    button:hover { background: #1d4ed8; }
-    .btn-danger { background: #ef4444; }
-    .btn-danger:hover { background: #dc2626; }
-    .btn-success { background: #22c55e; }
-    .btn-success:hover { background: #16a34a; }
-    .section-title { font-size: 13px; color: #94a3b8; margin: 12px 0 6px 0; font-weight: 600; display: flex; justify-content: space-between; }
-    #peers-list { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
-    .peer-chip { background: #0f172a; border: 1px solid #334155; padding: 4px 10px; border-radius: 20px; font-size: 12px; color: #38bdf8; }
-    #chat-box { height: 200px; background: #0f172a; border-radius: 8px; padding: 10px; overflow-y: auto; border: 1px solid #334155; margin-bottom: 10px; display: flex; flex-direction: column; gap: 6px; }
-    .msg { font-size: 13px; line-height: 1.4; word-break: break-word; }
-    .msg .sender { font-weight: bold; color: #38bdf8; margin-left: 4px; }
-    .msg.system { color: #64748b; font-style: italic; font-size: 12px; }
-  </style>
-</head>
-<body>
-
-<div class="card" onclick="enableAudioPlayback()">
-  <h2><img src="/icon.svg" width="28" height="28"> چت و ویس گیمینگ</h2>
-
-  <div id="join-form" class="flex">
-    <input id="username" placeholder="نام شما" value="بازیکن ۱">
-    <input id="room" placeholder="روم" value="team1" style="max-width: 100px;">
-    <button onclick="connect()">ورود</button>
-  </div>
-
-  <div id="room-panel" style="display: none;">
-    <div class="flex" style="justify-content: space-between;">
-      <button id="mic-btn" class="btn-danger" onclick="toggleMic()">🎙️ میکروفون: خاموش</button>
-      <button class="btn-danger" style="background:#475569;" onclick="location.reload()">خروج</button>
-    </div>
-
-    <div class="section-title">
-      <span>اعضای حاضر در روم:</span>
-      <span id="peer-count">1 نفر</span>
-    </div>
-    <div id="peers-list">
-      <div class="peer-chip">👤 شما (<span id="my-name"></span>)</div>
-    </div>
-
-    <div class="section-title">💬 چت متنی</div>
-    <div id="chat-box"></div>
-
-    <form class="flex" onsubmit="sendMessage(event)">
-      <input id="chat-input" placeholder="پیام خود را بنویسید..." autocomplete="off">
-      <button type="submit">ارسال</button>
-    </form>
-  </div>
-</div>
-
-<div id="audio-container"></div>
-
-<script>
-  let ws, localStream;
-  const peers = {};
-  const rtcConfig = {
-    iceServers: [
-      { urls: 'stun:stun.l.google.com:19302' },
-      { urls: 'stun:stun1.l.google.com:19302' },
-      { urls: 'stun:stun.services.mozilla.com' }
-    ]
-  };
-
-  function enableAudioPlayback() {
-    const audios = document.querySelectorAll('audio');
-    audios.forEach(a => a.play().catch(() => {}));
-  }
-
-  function connect() {
-    enableAudioPlayback();
-    const username = document.getElementById('username').value.trim() || 'بازیکن';
-    const room = document.getElementById('room').value.trim() || 'default';
-    document.getElementById('my-name').innerText = username;
-
-    const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    ws = new WebSocket(\`\${protocol}//\${location.host}/ws?room=\${room}\`);
-
-    ws.onopen = () => {
-      document.getElementById('join-form').style.display = 'none';
-      document.getElementById('room-panel').style.display = 'block';
-      addSystemMsg(\`وارد روم [\${room}] شدید.\`);
-      ws.send(JSON.stringify({ type: 'join', name: username }));
-    };
-
-    ws.onmessage = async (e) => {
-      const msg = JSON.parse(e.data);
-      handleSignalMessage(msg);
-    };
-
-    ws.onclose = () => addSystemMsg("اتصال قطع شد.");
-  }
-
-  async function handleSignalMessage(msg) {
-    const sender = msg.sender;
-
-    switch (msg.type) {
-      case 'join':
-        addSystemMsg(\`\${msg.name} وارد شد.\`);
-        ws.send(JSON.stringify({ type: 'welcome', name: document.getElementById('username').value }));
-        updatePeerList(sender, msg.name);
-        initPeerConnection(sender, msg.name, true);
-        break;
-
-      case 'welcome':
-        updatePeerList(sender, msg.name);
-        initPeerConnection(sender, msg.name, false);
-        break;
-
-      case 'chat':
-        addChatMsg(msg.name, msg.text);
-        break;
-
-      case 'offer':
-        const pc = initPeerConnection(sender, msg.name, false);
-        await pc.setRemoteDescription(new RTCSessionDescription(msg.sdp));
-        const answer = await pc.createAnswer();
-        await pc.setLocalDescription(answer);
-        ws.send(JSON.stringify({ type: 'answer', target: sender, sdp: answer }));
-        break;
-
-      case 'answer':
-        if (peers[sender]?.pc) {
-          await peers[sender].pc.setRemoteDescription(new RTCSessionDescription(msg.sdp));
-        }
-        break;
-
-      case 'ice':
-        if (peers[sender]?.pc) {
-          try { await peers[sender].pc.addIceCandidate(new RTCIceCandidate(msg.candidate)); } catch (e) {}
-        }
-        break;
-
-      case 'peer-left':
-        removePeer(sender);
-        break;
-    }
-  }
-
-  function initPeerConnection(peerId, peerName, isInitiator) {
-    if (peers[peerId]?.pc) return peers[peerId].pc;
-
-    const pc = new RTCPeerConnection(rtcConfig);
-    peers[peerId] = { pc, name: peerName };
-
-    if (localStream) {
-      localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
-    }
-
-    pc.ontrack = (event) => {
-      let audioEl = document.getElementById(\`audio-\${peerId}\`);
-      if (!audioEl) {
-        audioEl = document.createElement('audio');
-        audioEl.id = \`audio-\${peerId}\`;
-        audioEl.autoplay = true;
-        audioEl.playsInline = true;
-        document.getElementById('audio-container').appendChild(audioEl);
-      }
-      audioEl.srcObject = event.streams[0];
-      audioEl.play().catch(e => console.log("Autoplay check:", e));
-    };
-
-    pc.onicecandidate = (event) => {
-      if (event.candidate) {
-        ws.send(JSON.stringify({ type: 'ice', target: peerId, candidate: event.candidate }));
-      }
-    };
-
-    if (isInitiator) {
-      pc.createOffer().then(offer => {
-        pc.setLocalDescription(offer);
-        ws.send(JSON.stringify({ type: 'offer', target: peerId, sdp: offer, name: document.getElementById('username').value }));
-      });
-    }
-
-    return pc;
-  }
-
-  async function toggleMic() {
-    enableAudioPlayback();
-    const btn = document.getElementById('mic-btn');
-
-    if (!localStream) {
-      try {
-        localStream = await navigator.mediaDevices.getUserMedia({ 
-          audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } 
-        });
-        btn.innerText = "🎙️ میکروفون: روشن";
-        btn.className = "btn-success";
-
-        Object.keys(peers).forEach(peerId => {
-          const pc = peers[peerId].pc;
-          localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
-          pc.createOffer().then(offer => {
-            pc.setLocalDescription(offer);
-            ws.send(JSON.stringify({ type: 'offer', target: peerId, sdp: offer, name: document.getElementById('username').value }));
-          });
-        });
-
-      } catch (err) {
-        alert("خطا در دسترسی به میکروفون!");
-      }
-    } else {
-      localStream.getTracks().forEach(track => track.stop());
-      localStream = null;
-      btn.innerText = "🎙️ میکروفون: خاموش";
-      btn.className = "btn-danger";
-    }
-  }
-
-  function sendMessage(e) {
-    e.preventDefault();
-    const input = document.getElementById('chat-input');
-    const text = input.value.trim();
-    const name = document.getElementById('username').value.trim();
-
-    if (text && ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: 'chat', name, text }));
-      addChatMsg('شما', text);
-      input.value = '';
-    }
-  }
-
-  function addChatMsg(sender, text) {
-    const box = document.getElementById('chat-box');
-    const div = document.createElement('div');
-    div.className = 'msg';
-    div.innerHTML = \`<span class="sender">\${sender}:</span> \${escapeHtml(text)}\`;
-    box.appendChild(div);
-    box.scrollTop = box.scrollHeight;
-  }
-
-  function addSystemMsg(text) {
-    const box = document.getElementById('chat-box');
-    const div = document.createElement('div');
-    div.className = 'msg system';
-    div.innerText = \`• \${text}\`;
-    box.appendChild(div);
-    box.scrollTop = box.scrollHeight;
-  }
-
-  function updatePeerList(peerId, peerName) {
-    if (!document.getElementById(\`peer-\${peerId}\`)) {
-      const list = document.getElementById('peers-list');
-      const chip = document.createElement('div');
-      chip.className = 'peer-chip';
-      chip.id = \`peer-\${peerId}\`;
-      chip.innerText = \`👤 \${peerName}\`;
-      list.appendChild(chip);
-      document.getElementById('peer-count').innerText = \`\${list.children.length} نفر\`;
-    }
-  }
-
-  function removePeer(peerId) {
-    if (peers[peerId]) {
-      if (peers[peerId].pc) peers[peerId].pc.close();
-      delete peers[peerId];
-    }
-    const chip = document.getElementById(\`peer-\${peerId}\`);
-    if (chip) chip.remove();
-    const audioEl = document.getElementById(\`audio-\${peerId}\`);
-    if (audioEl) audioEl.remove();
-    document.getElementById('peer-count').innerText = \`\${document.getElementById('peers-list').children.length} نفر\`;
-  }
-
-  function escapeHtml(str) {
-    return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  }
-</script>
-</body>
-</html>`;
+// ==========================================
+// کدهای فرانت‌اند (HTML/CSS/JS)
+// ==========================================
+const htmlContent = "<!DOCTYPE html>\n<html lang=\"fa\" dir=\"rtl\">\n<head>\n  <meta charset=\"UTF-8\">\n  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no\">\n  <meta name=\"theme-color\" content=\"#090d16\">\n  <link rel=\"manifest\" href=\"manifest.json\">\n  <link rel=\"icon\" type=\"image/svg+xml\" href=\"icon.svg\">\n  <title>🎮 چت و ویس روم گیمینگ</title>\n  <style>\n    :root {\n      --bg-dark: #090d16;\n      --card-bg: #111827;\n      --panel-bg: #1e293b;\n      --input-bg: #0b1120;\n      --border-color: #334155;\n      --primary: #38bdf8;\n      --primary-hover: #0284c7;\n      --success: #22c55e;\n      --success-glow: rgba(34, 197, 94, 0.45);\n      --danger: #ef4444;\n      --danger-hover: #dc2626;\n      --warning: #f59e0b;\n      --text: #f8fafc;\n      --text-muted: #94a3b8;\n    }\n\n    * { box-sizing: border-box; margin: 0; padding: 0; font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; }\n    body { background-color: var(--bg-dark); color: var(--text); min-height: 100vh; display: flex; justify-content: center; align-items: center; padding: 16px; }\n\n    .app-card {\n      width: 100%;\n      max-width: 520px;\n      background: var(--card-bg);\n      border: 1px solid var(--border-color);\n      border-radius: 20px;\n      padding: 24px;\n      box-shadow: 0 16px 36px rgba(0, 0, 0, 0.6);\n      position: relative;\n    }\n\n    /* Header */\n    .header { text-align: center; margin-bottom: 20px; position: relative; }\n    .header h1 { font-size: 22px; color: var(--primary); display: flex; align-items: center; justify-content: center; gap: 10px; font-weight: 800; }\n    .header p { font-size: 13px; color: var(--text-muted); margin-top: 6px; }\n\n    /* Inputs & Buttons */\n    .form-group { margin-bottom: 14px; text-align: right; }\n    .form-label { font-size: 13px; font-weight: 600; color: var(--text-muted); margin-bottom: 6px; display: block; }\n    .input-field {\n      width: 100%;\n      padding: 12px 14px;\n      background: var(--input-bg);\n      border: 1px solid var(--border-color);\n      border-radius: 12px;\n      color: #fff;\n      font-size: 14px;\n      outline: none;\n      transition: all 0.2s;\n    }\n    .input-field:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.2); }\n\n    .btn {\n      display: inline-flex;\n      align-items: center;\n      justify-content: center;\n      gap: 6px;\n      padding: 11px 16px;\n      border-radius: 10px;\n      font-size: 14px;\n      font-weight: 700;\n      cursor: pointer;\n      border: none;\n      transition: all 0.2s;\n      user-select: none;\n    }\n    .btn:active { transform: scale(0.97); }\n    .btn-primary { background: linear-gradient(135deg, #0284c7, #2563eb); color: #fff; width: 100%; padding: 14px; font-size: 15px; border-radius: 12px; }\n    .btn-primary:hover { background: linear-gradient(135deg, #0369a1, #1d4ed8); }\n    .btn-success { background: #15803d; color: #fff; }\n    .btn-success:hover { background: #166534; }\n    .btn-danger { background: #dc2626; color: #fff; }\n    .btn-danger:hover { background: #b91c1c; }\n    .btn-secondary { background: var(--panel-bg); color: var(--text); border: 1px solid var(--border-color); }\n    .btn-secondary:hover { background: #334155; }\n    .btn-icon { padding: 8px 12px; font-size: 13px; }\n\n    /* Mode selector */\n    .mode-selector { display: flex; gap: 8px; margin-bottom: 16px; }\n    .mode-btn { flex: 1; padding: 10px; font-size: 12px; border-radius: 10px; border: 1px solid var(--border-color); background: var(--input-bg); color: var(--text-muted); cursor: pointer; text-align: center; }\n    .mode-btn.active { border-color: var(--primary); background: rgba(56, 189, 248, 0.12); color: var(--primary); font-weight: bold; }\n\n    /* Server Settings Accordion */\n    .server-config-toggle {\n      font-size: 11px;\n      color: var(--text-muted);\n      cursor: pointer;\n      text-align: center;\n      margin-top: 10px;\n      text-decoration: underline;\n    }\n    .server-config-box {\n      display: none;\n      background: var(--input-bg);\n      border: 1px dashed var(--border-color);\n      border-radius: 10px;\n      padding: 10px;\n      margin-top: 10px;\n    }\n\n    /* In-room Topbar */\n    .room-header {\n      display: flex;\n      justify-content: space-between;\n      align-items: center;\n      padding-bottom: 14px;\n      margin-bottom: 14px;\n      border-bottom: 1px solid var(--border-color);\n    }\n    .room-badge {\n      display: inline-flex;\n      align-items: center;\n      gap: 6px;\n      background: rgba(34, 197, 94, 0.1);\n      color: var(--success);\n      padding: 4px 10px;\n      border-radius: 20px;\n      font-size: 12px;\n      font-weight: 700;\n      border: 1px solid rgba(34, 197, 94, 0.3);\n    }\n\n    /* Voice Actions */\n    .voice-actions { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 8px; margin-bottom: 14px; }\n\n    /* Push To Talk Touch Button */\n    #ptt-touch-btn {\n      display: none;\n      width: 100%;\n      margin-bottom: 12px;\n      padding: 16px;\n      background: #334155;\n      color: #fff;\n      font-size: 15px;\n      font-weight: bold;\n      border-radius: 12px;\n      text-align: center;\n      cursor: pointer;\n      user-select: none;\n      touch-action: none;\n    }\n    #ptt-touch-btn.active {\n      background: #16a34a;\n      box-shadow: 0 0 16px var(--success-glow);\n    }\n\n    /* Active Peers Grid */\n    .section-title { font-size: 12px; color: var(--text-muted); font-weight: 700; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; }\n    .peers-container {\n      display: grid;\n      grid-template-columns: 1fr;\n      gap: 8px;\n      margin-bottom: 14px;\n      max-height: 180px;\n      overflow-y: auto;\n    }\n    .peer-card {\n      background: var(--input-bg);\n      border: 1px solid var(--border-color);\n      border-radius: 10px;\n      padding: 8px 12px;\n      display: flex;\n      align-items: center;\n      justify-content: space-between;\n      transition: all 0.2s ease-in-out;\n    }\n    .peer-card.speaking {\n      border-color: var(--success) !important;\n      box-shadow: 0 0 10px var(--success-glow);\n      background: rgba(34, 197, 94, 0.08);\n    }\n    .peer-info { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; }\n    .peer-volume-control { display: flex; align-items: center; gap: 6px; font-size: 12px; }\n    .peer-volume-control input[type=\"range\"] {\n      width: 70px;\n      accent-color: var(--primary);\n      cursor: pointer;\n    }\n\n    /* Chat Area */\n    .chat-box {\n      height: 170px;\n      background: var(--input-bg);\n      border: 1px solid var(--border-color);\n      border-radius: 10px;\n      padding: 10px;\n      overflow-y: auto;\n      display: flex;\n      flex-direction: column;\n      gap: 6px;\n      margin-bottom: 10px;\n    }\n    .msg { font-size: 13px; line-height: 1.4; word-break: break-word; }\n    .msg .sender { color: var(--primary); font-weight: bold; margin-left: 4px; }\n    .msg.system { color: #64748b; font-style: italic; font-size: 12px; }\n\n    .chat-form { display: flex; gap: 8px; }\n\n    /* Toast Notification */\n    #toast {\n      position: absolute;\n      top: -15px;\n      left: 50%;\n      transform: translateX(-50%);\n      background: #0284c7;\n      color: #fff;\n      padding: 6px 14px;\n      border-radius: 20px;\n      font-size: 12px;\n      font-weight: bold;\n      opacity: 0;\n      pointer-events: none;\n      transition: all 0.3s ease;\n      box-shadow: 0 4px 12px rgba(0,0,0,0.5);\n      z-index: 99;\n      white-space: nowrap;\n    }\n    #toast.show { top: 12px; opacity: 1; }\n\n    /* Scrollbars */\n    ::-webkit-scrollbar { width: 5px; height: 5px; }\n    ::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }\n  </style>\n</head>\n<body>\n\n<div id=\"toast\">پیام سیستم</div>\n\n<div class=\"app-card\" onclick=\"enableAudioPlayback()\">\n  <!-- نمای ورود به اتاق -->\n  <div id=\"join-section\">\n    <div class=\"header\">\n      <h1><img src=\"icon.svg\" width=\"30\" height=\"30\" alt=\"Logo\"> چت صوتی گیمینگ</h1>\n      <p>بدون نیاز به نرم‌افزار، با دوستانت مستقیم در مرورگر صحبت کن</p>\n    </div>\n\n    <form onsubmit=\"handleJoinSubmit(event)\">\n      <div class=\"form-group\">\n        <label class=\"form-label\">نام شما در بازی (الزامی):</label>\n        <input id=\"username\" class=\"input-field\" placeholder=\"مثلاً: سهراب یا GamerPro\" autofocus autocomplete=\"off\" maxlength=\"25\">\n      </div>\n\n      <div class=\"form-group\">\n        <label class=\"form-label\">اتاق گفت‌وگو:</label>\n        <input id=\"room\" class=\"input-field\" value=\"public\" placeholder=\"نام اتاق\">\n        <small style=\"color: var(--text-muted); font-size: 11px; margin-top: 4px; display: block;\">\n          اتاق «public» اتاق عمومی مشترک برای همه است. برای روم اختصاصی اسمی دلخواه وارد کنید.\n        </small>\n      </div>\n\n      <label class=\"form-label\">حالت میکروفون:</label>\n      <div class=\"mode-selector\">\n        <div id=\"mode-voice\" class=\"mode-btn active\" onclick=\"switchMicMode('voice')\">\n          🎙️ صدای خودکار (آزاد)\n        </div>\n        <div id=\"mode-ptt\" class=\"mode-btn\" onclick=\"switchMicMode('ptt')\">\n          🔘 کلید فشاری (Push-to-Talk)\n        </div>\n      </div>\n\n      <button type=\"submit\" class=\"btn btn-primary\">\n        🚀 ورود به روم و فعال‌سازی صدا\n      </button>\n\n      <div class=\"server-config-toggle\" onclick=\"toggleServerConfig()\">\n        ⚙️ تنظیمات سرور سیگنالینگ\n      </div>\n\n      <div id=\"server-config-box\" class=\"server-config-box\">\n        <label class=\"form-label\" style=\"font-size: 11px;\">آدرس سرور سیگنالینگ (WebSocket):</label>\n        <input id=\"custom-server\" class=\"input-field\" style=\"font-size: 12px; padding: 8px;\" placeholder=\"مثال: tcp.javadxpro.workers.dev\">\n        <small style=\"color: var(--text-muted); font-size: 10px; display: block; margin-top: 4px;\">\n          در صورت میزبانی روی GitHub Pages، آدرس ورکر کلادفلر شما در اینجا استفاده می‌شود.\n        </small>\n      </div>\n    </form>\n  </div>\n\n  <!-- نمای داخل اتاق چت و ویس -->\n  <div id=\"room-section\" style=\"display: none;\">\n    <div class=\"room-header\">\n      <div>\n        <span class=\"room-badge\" id=\"room-display\">🟢 اتاق عمومی</span>\n      </div>\n      <div style=\"display: flex; gap: 6px;\">\n        <button class=\"btn btn-secondary btn-icon\" onclick=\"copyRoomLink()\" title=\"کپی لینک دعوت\">🔗 کپی لینک</button>\n        <button class=\"btn btn-secondary btn-icon\" onclick=\"location.reload()\" title=\"خروج از اتاق\">خروج</button>\n      </div>\n    </div>\n\n    <!-- دکمه‌های کنترل ویس -->\n    <div class=\"voice-actions\">\n      <button id=\"mic-btn\" class=\"btn btn-success\" onclick=\"toggleMic()\">\n        🎙️ میکروفون: باز\n      </button>\n      <button id=\"deafen-btn\" class=\"btn btn-secondary\" onclick=\"toggleDeafen()\">\n        🔊 صدای بازی\n      </button>\n      <button id=\"ptt-mode-btn\" class=\"btn btn-secondary\" onclick=\"toggleMicMode()\">\n        ⚙️ حالت: آزاد\n      </button>\n    </div>\n\n    <!-- دکمه نگه‌داشتن PTT مخصوص گوشی و تاچ -->\n    <div id=\"ptt-touch-btn\">\n      🔘 نگه دارید تا صحبت کنید (یا کلید Space در کیبورد)\n    </div>\n\n    <!-- لیست حاضرین -->\n    <div class=\"section-title\">\n      <span>👥 هم‌تیمی‌های حاضر:</span>\n      <span id=\"player-count\">۱ نفر</span>\n    </div>\n\n    <div class=\"peers-container\" id=\"peers-container\">\n      <!-- کارت کاربر کنونی -->\n      <div class=\"peer-card\" id=\"my-card\">\n        <div class=\"peer-info\">\n          <span id=\"my-mic-icon\">🎙️</span>\n          <span>شما (<b id=\"my-name-display\"></b>)</span>\n        </div>\n        <div style=\"font-size: 11px; color: var(--primary); font-weight: bold;\">شما</div>\n      </div>\n    </div>\n\n    <!-- چت متنی گیمینگ -->\n    <div class=\"section-title\">💬 چت متنی اتاق</div>\n    <div class=\"chat-box\" id=\"chat-box\"></div>\n\n    <form class=\"chat-form\" onsubmit=\"handleSendChat(event)\">\n      <input id=\"chat-input\" class=\"input-field\" placeholder=\"پیامی بنویسید... (Enter برای ارسال)\" autocomplete=\"off\">\n      <button type=\"submit\" class=\"btn btn-secondary\">ارسال</button>\n    </form>\n  </div>\n</div>\n\n<div id=\"audio-container\"></div>\n\n<script>\n  let ws = null;\n  let myPeerId = null;\n  let myUsername = '';\n  let localStream = null;\n  let isMicMuted = false;\n  let isDeafened = false;\n  let micMode = 'voice'; // 'voice' or 'ptt'\n  let isPttPressed = false;\n  const peers = {}; // peerId -> { pc, name, muted, volume, audioEl }\n\n  const rtcConfig = {\n    iceServers: [\n      { urls: 'stun:stun.l.google.com:19302' },\n      { urls: 'stun:stun1.l.google.com:19302' },\n      { urls: 'stun:stun2.l.google.com:19302' },\n      { urls: 'stun:stun.cloudflare.com:3478' },\n      { urls: 'stun:stun.services.mozilla.com' }\n    ]\n  };\n\n  // مقداردهی اولیه آدرس سرور و پارامترها\n  window.addEventListener('DOMContentLoaded', () => {\n    const params = new URLSearchParams(window.location.search);\n    const roomParam = params.get('room');\n    if (roomParam && roomParam.trim()) {\n      document.getElementById('room').value = roomParam.trim();\n    }\n\n    const savedServer = localStorage.getItem('signal_server');\n    const customServerInput = document.getElementById('custom-server');\n    if (savedServer) {\n      customServerInput.value = savedServer;\n    } else if (location.hostname.endsWith('github.io')) {\n      customServerInput.value = 'tcp.javadxpro.workers.dev';\n    } else {\n      customServerInput.value = location.host;\n    }\n  });\n\n  function toggleServerConfig() {\n    const box = document.getElementById('server-config-box');\n    box.style.display = box.style.display === 'block' ? 'none' : 'block';\n  }\n\n  function getWsUrl(room) {\n    const customServerInput = document.getElementById('custom-server');\n    let host = (customServerInput.value && customServerInput.value.trim()) ? customServerInput.value.trim() : location.host;\n    \n    // ذخیره در localStorage برای دفعات بعد\n    localStorage.setItem('signal_server', host);\n\n    // حذف پروتکل در صورت وارد کردن توسط کاربر\n    host = host.replace(/^https?:\\/\\//, '').replace(/^wss?:\\/\\//, '').replace(/\\/$/, '');\n\n    const protocol = (location.protocol === 'https:' || host.includes('workers.dev')) ? 'wss:' : 'ws:';\n    return `${protocol}//${host}/ws?room=${encodeURIComponent(room)}`;\n  }\n\n  function showToast(text) {\n    const toast = document.getElementById('toast');\n    toast.textContent = text;\n    toast.classList.add('show');\n    setTimeout(() => toast.classList.remove('show'), 3000);\n  }\n\n  function playSound(type) {\n    try {\n      const ctx = new (window.AudioContext || window.webkitAudioContext)();\n      const osc = ctx.createOscillator();\n      const gain = ctx.createGain();\n      osc.connect(gain);\n      gain.connect(ctx.destination);\n      const t = ctx.currentTime;\n\n      if (type === 'join') {\n        osc.frequency.setValueAtTime(440, t);\n        osc.frequency.exponentialRampToValueAtTime(880, t + 0.12);\n        gain.gain.setValueAtTime(0.08, t);\n        gain.gain.linearRampToValueAtTime(0, t + 0.18);\n        osc.start(t);\n        osc.stop(t + 0.18);\n      } else if (type === 'leave') {\n        osc.frequency.setValueAtTime(600, t);\n        osc.frequency.exponentialRampToValueAtTime(300, t + 0.12);\n        gain.gain.setValueAtTime(0.08, t);\n        gain.gain.linearRampToValueAtTime(0, t + 0.18);\n        osc.start(t);\n        osc.stop(t + 0.18);\n      } else if (type === 'mute') {\n        osc.frequency.setValueAtTime(260, t);\n        gain.gain.setValueAtTime(0.06, t);\n        gain.gain.linearRampToValueAtTime(0, t + 0.08);\n        osc.start(t);\n        osc.stop(t + 0.08);\n      } else if (type === 'unmute') {\n        osc.frequency.setValueAtTime(520, t);\n        gain.gain.setValueAtTime(0.06, t);\n        gain.gain.linearRampToValueAtTime(0, t + 0.08);\n        osc.start(t);\n        osc.stop(t + 0.08);\n      }\n    } catch (e) {}\n  }\n\n  function enableAudioPlayback() {\n    const audios = document.querySelectorAll('audio');\n    audios.forEach(a => {\n      if (a.paused) a.play().catch(() => {});\n    });\n  }\n\n  function switchMicMode(mode) {\n    micMode = mode;\n    document.getElementById('mode-voice').classList.toggle('active', mode === 'voice');\n    document.getElementById('mode-ptt').classList.toggle('active', mode === 'ptt');\n  }\n\n  function toggleMicMode() {\n    switchMicMode(micMode === 'voice' ? 'ptt' : 'voice');\n    updatePttUI();\n  }\n\n  function updatePttUI() {\n    const btn = document.getElementById('ptt-mode-btn');\n    const touchBtn = document.getElementById('ptt-touch-btn');\n    if (micMode === 'ptt') {\n      btn.innerText = '⚙️ حالت: PTT (کلیدی)';\n      touchBtn.style.display = 'block';\n      setMicMuted(true);\n      showToast(\"حالت فشاری (PTT) فعال شد. کلید Space را نگه دارید.\");\n    } else {\n      btn.innerText = '⚙️ حالت: آزاد';\n      touchBtn.style.display = 'none';\n      setMicMuted(false);\n      showToast(\"حالت آزاد فعال شد. صدا دائم باز است.\");\n    }\n  }\n\n  async function handleJoinSubmit(e) {\n    e.preventDefault();\n    const usernameInput = document.getElementById('username');\n    const name = usernameInput.value.trim();\n\n    if (!name) {\n      alert(\"لطفاً نام مستعار خود را در بازی وارد کنید!\");\n      usernameInput.focus();\n      return;\n    }\n\n    myUsername = name;\n    document.getElementById('my-name-display').textContent = myUsername;\n\n    const rawRoom = document.getElementById('room').value.trim();\n    const room = rawRoom || 'public';\n    document.getElementById('room-display').textContent = room === 'public' ? '🟢 اتاق عمومی' : `🟢 ${room}`;\n\n    // دریافت دسترسی میکروفون\n    try {\n      localStream = await navigator.mediaDevices.getUserMedia({\n        audio: {\n          echoCancellation: true,\n          noiseSuppression: true,\n          autoGainControl: true\n        }\n      });\n      setupAudioMeter('my-card', localStream);\n    } catch (err) {\n      console.warn(\"عدم دسترسی به میکروفون:\", err);\n      showToast(\"میکروفون فعال نشد. فقط صدا را می‌شنوید.\");\n    }\n\n    // آدرس سرور سیگنالینگ\n    const wsUrl = getWsUrl(room);\n\n    try {\n      ws = new WebSocket(wsUrl);\n    } catch(err) {\n      alert(\"خطا در ایجاد اتصال وب‌سوکت به: \" + wsUrl);\n      return;\n    }\n\n    ws.onopen = () => {\n      document.getElementById('join-section').style.display = 'none';\n      document.getElementById('room-section').style.display = 'block';\n      updatePttUI();\n      addSystemMsg(`وارد اتاق [${room === 'public' ? 'عمومی' : room}] شدید.`);\n    };\n\n    ws.onmessage = async (e) => {\n      let msg;\n      try { msg = JSON.parse(e.data); } catch (err) { return; }\n      handleSignalMessage(msg);\n    };\n\n    ws.onclose = () => {\n      addSystemMsg(\"اتصال به سرور قطع شد. در حال تلاش برای اتصال مجدد...\");\n    };\n\n    ws.onerror = (err) => {\n      console.error(\"WebSocket error:\", err);\n      showToast(\"خطا در اتصال به سرور سیگنالینگ! بررسی کنید سرور فعال باشد.\");\n    };\n  }\n\n  async function handleSignalMessage(msg) {\n    const sender = msg.sender;\n\n    switch (msg.type) {\n      case 'init':\n        myPeerId = msg.peerId;\n        ws.send(JSON.stringify({ type: 'join', name: myUsername, muted: isMicMuted }));\n        break;\n\n      case 'join':\n        addSystemMsg(`🎮 ${msg.name} وارد بازی شد.`);\n        playSound('join');\n        updatePeerUI(sender, msg.name, msg.muted);\n\n        ws.send(JSON.stringify({ type: 'welcome', target: sender, name: myUsername, muted: isMicMuted }));\n        initiatePeerOffer(sender, msg.name);\n        break;\n\n      case 'welcome':\n        updatePeerUI(sender, msg.name, msg.muted);\n        break;\n\n      case 'offer':\n        if (msg.target && msg.target !== myPeerId) return;\n        handleRemoteOffer(sender, msg.name, msg.sdp);\n        break;\n\n      case 'answer':\n        if (msg.target && msg.target !== myPeerId) return;\n        handleRemoteAnswer(sender, msg.sdp);\n        break;\n\n      case 'ice':\n        if (msg.target && msg.target !== myPeerId) return;\n        handleRemoteIce(sender, msg.candidate);\n        break;\n\n      case 'mute-status':\n        setPeerMuteState(sender, msg.muted);\n        break;\n\n      case 'chat':\n        addChatMsg(msg.name, msg.text);\n        break;\n\n      case 'peer-left':\n        removePeer(sender);\n        break;\n    }\n  }\n\n  function getOrCreatePeerConnection(peerId, peerName) {\n    if (peers[peerId]?.pc) return peers[peerId].pc;\n\n    const pc = new RTCPeerConnection(rtcConfig);\n    peers[peerId] = { pc, name: peerName, volume: 1, audioEl: null };\n\n    if (localStream) {\n      localStream.getTracks().forEach(track => pc.addTrack(track, localStream));\n    }\n\n    pc.onicecandidate = (event) => {\n      if (event.candidate && ws && ws.readyState === WebSocket.OPEN) {\n        ws.send(JSON.stringify({\n          type: 'ice',\n          target: peerId,\n          candidate: event.candidate\n        }));\n      }\n    };\n\n    pc.ontrack = (event) => {\n      let audioEl = document.getElementById(`audio-${peerId}`);\n      if (!audioEl) {\n        audioEl = document.createElement('audio');\n        audioEl.id = `audio-${peerId}`;\n        audioEl.autoplay = true;\n        audioEl.playsInline = true;\n        document.getElementById('audio-container').appendChild(audioEl);\n      }\n      audioEl.srcObject = event.streams[0];\n      audioEl.muted = isDeafened;\n      audioEl.play().catch(e => console.log(\"Autoplay:\", e));\n      peers[peerId].audioEl = audioEl;\n\n      setupAudioMeter(`peer-${peerId}`, event.streams[0]);\n    };\n\n    return pc;\n  }\n\n  async function initiatePeerOffer(peerId, peerName) {\n    const pc = getOrCreatePeerConnection(peerId, peerName);\n    try {\n      const offer = await pc.createOffer();\n      await pc.setLocalDescription(offer);\n      ws.send(JSON.stringify({\n        type: 'offer',\n        target: peerId,\n        sdp: offer,\n        name: myUsername\n      }));\n    } catch (e) {\n      console.error(\"Offer error:\", e);\n    }\n  }\n\n  async function handleRemoteOffer(peerId, peerName, sdp) {\n    const pc = getOrCreatePeerConnection(peerId, peerName);\n    try {\n      await pc.setRemoteDescription(new RTCSessionDescription(sdp));\n      const answer = await pc.createAnswer();\n      await pc.setLocalDescription(answer);\n      ws.send(JSON.stringify({\n        type: 'answer',\n        target: peerId,\n        sdp: answer\n      }));\n    } catch (e) {\n      console.error(\"Answer error:\", e);\n    }\n  }\n\n  async function handleRemoteAnswer(peerId, sdp) {\n    const peer = peers[peerId];\n    if (peer && peer.pc) {\n      try {\n        await peer.pc.setRemoteDescription(new RTCSessionDescription(sdp));\n      } catch (e) {\n        console.error(\"SetRemote error:\", e);\n      }\n    }\n  }\n\n  async function handleRemoteIce(peerId, candidate) {\n    const peer = peers[peerId];\n    if (peer && peer.pc && candidate) {\n      try {\n        await peer.pc.addIceCandidate(new RTCIceCandidate(candidate));\n      } catch (e) {}\n    }\n  }\n\n  function toggleMic() {\n    setMicMuted(!isMicMuted);\n  }\n\n  function setMicMuted(muted) {\n    isMicMuted = muted;\n    if (localStream) {\n      localStream.getAudioTracks().forEach(t => t.enabled = !isMicMuted);\n    }\n\n    const btn = document.getElementById('mic-btn');\n    const myMic = document.getElementById('my-mic-icon');\n\n    if (isMicMuted) {\n      btn.className = 'btn btn-danger';\n      btn.innerText = '🔇 میکروفون: بسته';\n      myMic.innerText = '🔇';\n      playSound('mute');\n    } else {\n      btn.className = 'btn btn-success';\n      btn.innerText = '🎙️ میکروفون: باز';\n      myMic.innerText = '🎙️';\n      playSound('unmute');\n    }\n\n    if (ws && ws.readyState === WebSocket.OPEN) {\n      ws.send(JSON.stringify({ type: 'mute-status', muted: isMicMuted }));\n    }\n  }\n\n  function toggleDeafen() {\n    isDeafened = !isDeafened;\n    const btn = document.getElementById('deafen-btn');\n    const audios = document.querySelectorAll('#audio-container audio');\n    audios.forEach(a => a.muted = isDeafened);\n\n    if (isDeafened) {\n      btn.className = 'btn btn-danger';\n      btn.innerText = '🔈 صدا: قطع';\n      showToast(\"صدای سایر بازیکنان قطع شد.\");\n    } else {\n      btn.className = 'btn btn-secondary';\n      btn.innerText = '🔊 صدای بازی';\n      showToast(\"صدای سایر بازیکنان وصل شد.\");\n    }\n  }\n\n  function setPeerVolume(peerId, val) {\n    const audio = document.getElementById(`audio-${peerId}`);\n    if (audio) {\n      audio.volume = parseFloat(val);\n    }\n  }\n\n  function setPeerMuteState(peerId, muted) {\n    const icon = document.getElementById(`peer-mic-${peerId}`);\n    if (icon) icon.innerText = muted ? '🔇' : '🎙️';\n    if (peers[peerId]) peers[peerId].muted = muted;\n  }\n\n  function setupAudioMeter(elementId, stream) {\n    try {\n      const audioCtx = new (window.AudioContext || window.webkitAudioContext)();\n      const source = audioCtx.createMediaStreamSource(stream);\n      const analyser = audioCtx.createAnalyser();\n      analyser.fftSize = 256;\n      analyser.smoothingTimeConstant = 0.4;\n      source.connect(analyser);\n\n      const dataArray = new Uint8Array(analyser.frequencyBinCount);\n      let speakingTimer = null;\n\n      function monitor() {\n        analyser.getByteFrequencyData(dataArray);\n        let sum = 0;\n        for (let i = 0; i < dataArray.length; i++) sum += dataArray[i];\n        const avg = sum / dataArray.length;\n\n        const el = document.getElementById(elementId);\n        if (el) {\n          if (avg > 18) {\n            el.classList.add('speaking');\n            if (speakingTimer) clearTimeout(speakingTimer);\n            speakingTimer = setTimeout(() => el.classList.remove('speaking'), 350);\n          }\n        }\n        requestAnimationFrame(monitor);\n      }\n      monitor();\n    } catch (e) {}\n  }\n\n  function updatePeerUI(peerId, peerName, muted) {\n    if (document.getElementById(`peer-${peerId}`)) return;\n\n    const container = document.getElementById('peers-container');\n    const card = document.createElement('div');\n    card.className = 'peer-card';\n    card.id = `peer-${peerId}`;\n\n    const info = document.createElement('div');\n    info.className = 'peer-info';\n\n    const micSpan = document.createElement('span');\n    micSpan.id = `peer-mic-${peerId}`;\n    micSpan.innerText = muted ? '🔇' : '🎙️';\n\n    const nameSpan = document.createElement('span');\n    nameSpan.textContent = peerName || 'بازیکن';\n\n    info.appendChild(micSpan);\n    info.appendChild(nameSpan);\n\n    const volControl = document.createElement('div');\n    volControl.className = 'peer-volume-control';\n    volControl.innerHTML = `\n      <span>🔊</span>\n      <input type=\"range\" min=\"0\" max=\"1\" step=\"0.05\" value=\"1\" title=\"تنظیم صدای این دوست\" oninput=\"setPeerVolume('${peerId}', this.value)\">\n    `;\n\n    card.appendChild(info);\n    card.appendChild(volControl);\n    container.appendChild(card);\n\n    updatePlayerCount();\n  }\n\n  function removePeer(peerId) {\n    if (peers[peerId]) {\n      if (peers[peerId].pc) peers[peerId].pc.close();\n      delete peers[peerId];\n    }\n    const card = document.getElementById(`peer-${peerId}`);\n    if (card) card.remove();\n    const audio = document.getElementById(`audio-${peerId}`);\n    if (audio) audio.remove();\n\n    playSound('leave');\n    updatePlayerCount();\n  }\n\n  function updatePlayerCount() {\n    const count = document.getElementById('peers-container').children.length;\n    document.getElementById('player-count').innerText = `${count} نفر`;\n  }\n\n  function copyRoomLink() {\n    const rawRoom = document.getElementById('room').value.trim();\n    const room = rawRoom || 'public';\n    const link = `${location.origin}${location.pathname}?room=${encodeURIComponent(room)}`;\n\n    if (navigator.clipboard) {\n      navigator.clipboard.writeText(link).then(() => {\n        showToast(\"لینک اتاق کپی شد! برای دوستانت ارسال کن.\");\n      }).catch(() => prompt(\"لینک را کپی کنید:\", link));\n    } else {\n      prompt(\"لینک را کپی کنید:\", link);\n    }\n  }\n\n  function handleSendChat(e) {\n    e.preventDefault();\n    const input = document.getElementById('chat-input');\n    const text = input.value.trim();\n\n    if (text && ws && ws.readyState === WebSocket.OPEN) {\n      ws.send(JSON.stringify({ type: 'chat', name: myUsername, text }));\n      addChatMsg('شما', text);\n      input.value = '';\n    }\n  }\n\n  function addChatMsg(sender, text) {\n    const box = document.getElementById('chat-box');\n    const div = document.createElement('div');\n    div.className = 'msg';\n\n    const senderSpan = document.createElement('span');\n    senderSpan.className = 'sender';\n    senderSpan.textContent = sender + ': ';\n\n    const textSpan = document.createElement('span');\n    textSpan.textContent = text;\n\n    div.appendChild(senderSpan);\n    div.appendChild(textSpan);\n    box.appendChild(div);\n    box.scrollTop = box.scrollHeight;\n  }\n\n  function addSystemMsg(text) {\n    const box = document.getElementById('chat-box');\n    const div = document.createElement('div');\n    div.className = 'msg system';\n    div.textContent = '• ' + text;\n    box.appendChild(div);\n    box.scrollTop = box.scrollHeight;\n  }\n\n  window.addEventListener('keydown', (e) => {\n    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;\n\n    if (e.key === 'm' || e.key === 'M' || e.key === 'ئ') {\n      toggleMic();\n    }\n\n    if (micMode === 'ptt' && (e.code === 'Space' || e.key === 'v' || e.key === 'V')) {\n      if (!isPttPressed) {\n        isPttPressed = true;\n        setMicMuted(false);\n        const myCard = document.getElementById('my-card');\n        if (myCard) myCard.classList.add('speaking');\n      }\n      e.preventDefault();\n    }\n  });\n\n  window.addEventListener('keyup', (e) => {\n    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;\n\n    if (micMode === 'ptt' && (e.code === 'Space' || e.key === 'v' || e.key === 'V')) {\n      if (isPttPressed) {\n        isPttPressed = false;\n        setMicMuted(true);\n        const myCard = document.getElementById('my-card');\n        if (myCard) myCard.classList.remove('speaking');\n      }\n      e.preventDefault();\n    }\n  });\n\n  const pttTouch = document.getElementById('ptt-touch-btn');\n  const startPttTouch = (e) => {\n    e.preventDefault();\n    pttTouch.classList.add('active');\n    setMicMuted(false);\n  };\n  const endPttTouch = (e) => {\n    e.preventDefault();\n    pttTouch.classList.remove('active');\n    setMicMuted(true);\n  };\n  pttTouch.addEventListener('mousedown', startPttTouch);\n  pttTouch.addEventListener('mouseup', endPttTouch);\n  pttTouch.addEventListener('touchstart', startPttTouch, { passive: false });\n  pttTouch.addEventListener('touchend', endPttTouch, { passive: false });\n</script>\n</body>\n</html>\n";

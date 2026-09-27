@@ -4,9 +4,11 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "deploy": "wrangler deploy"
+    "dev": "wrangler dev --ip 0.0.0.0 --port 8787",
+    "deploy": "wrangler deploy",
+    "test": "node --check index.js"
   },
   "devDependencies": {
-    "wrangler": "^3.0.0"
+    "wrangler": "^3.114.17"
   }
 }

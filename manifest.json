@@ -1,18 +1,18 @@
 {
-  "name": "GamingChat - chat &amp; voice chat in game",
+  "name": "GamingChat - چت و ویس گیمینگ",
   "short_name": "GamingChat",
-  "description": "a app for chat &amp; voice chat in game",
+  "description": "پلتفرم چت صوتی و متنی سبک و سریع برای گیمرها",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#000a70",
-  "theme_color": "#650065",
+  "background_color": "#0f172a",
+  "theme_color": "#1e293b",
   "icons": [
     {
-      "src": "https://raw.githubusercontent.com/javadxpro/TCP/refs/heads/main/icon.svg",
+      "src": "/icon.svg",
       "sizes": "any",
       "type": "image/svg+xml",
       "purpose": "any maskable"
     }
   ],
-  "id": "GC.XP.dev"
+  "id": "gaming-voice-chat"
 }
