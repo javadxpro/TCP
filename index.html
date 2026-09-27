@@ -108,6 +108,11 @@
       margin-top: 10px;
     }
 
+    .server-row { display: flex; gap: 8px; align-items: stretch; }
+    .server-row .input-field { flex: 1; min-width: 0; text-align: left; }
+    .paste-btn { flex: 0 0 auto; width: auto; padding: 0 14px; white-space: nowrap; margin: 0; }
+    .server-hint { color: var(--text-muted); font-size: 11px; display: block; margin-top: 6px; }
+
     /* In-room Topbar */
     .room-header {
       display: flex;
@@ -268,21 +273,19 @@
         </div>
       </div>
 
+      <div class="form-group">
+        <label class="form-label" for="custom-server">🖥️ آدرس سرور (IP):</label>
+        <div class="server-row">
+          <input id="custom-server" class="input-field" dir="ltr" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="192.168.1.5:8080">
+          <button type="button" class="btn btn-secondary paste-btn" onclick="pasteServer()">📋 پیست</button>
+        </div>
+        <small class="server-hint">آدرسی که میزبان فرستاده را پیست کنید یا دستی بنویسید.</small>
+      </div>
+
       <button type="submit" class="btn btn-primary">
         🚀 ورود به روم و فعال‌سازی صدا
       </button>
 
-      <div class="server-config-toggle" onclick="toggleServerConfig()">
-        ⚙️ تنظیمات سرور سیگنالینگ
-      </div>
-
-      <div id="server-config-box" class="server-config-box">
-        <label class="form-label" style="font-size: 11px;">آدرس سرور سیگنالینگ (WebSocket):</label>
-        <input id="custom-server" class="input-field" style="font-size: 12px; padding: 8px;" placeholder="مثال: tcp.javadxpro.workers.dev">
-        <small style="color: var(--text-muted); font-size: 10px; display: block; margin-top: 4px;">
-          در صورت میزبانی روی GitHub Pages، آدرس ورکر کلادفلر شما در اینجا استفاده می‌شود.
-        </small>
-      </div>
     </form>
   </div>
 
@@ -375,6 +378,8 @@
       document.getElementById('room').value = roomParam.trim();
     }
 
+    const serverParam = params.get('server');
+    if (serverParam && serverParam.trim()) localStorage.setItem('signal_server', serverParam.trim());
     const savedServer = localStorage.getItem('signal_server');
     const customServerInput = document.getElementById('custom-server');
     if (savedServer) {
@@ -404,9 +409,21 @@
     location.reload();
   }
 
-  function toggleServerConfig() {
-    const box = document.getElementById('server-config-box');
-    box.style.display = box.style.display === 'block' ? 'none' : 'block';
+  // دکمه پیست آدرس سرور
+  async function pasteServer() {
+    const input = document.getElementById('custom-server');
+    try {
+      const text = (await navigator.clipboard.readText() || '').trim();
+      if (!text) throw new Error('empty');
+      // اگر متن کامل پیام بود، اولین آدرس/IP داخلش را بردار
+      const m = text.match(/(?:wss?:\/\/|https?:\/\/)?[a-z0-9.-]+\.[a-z0-9.-]+(?::\d{2,5})?/i);
+      input.value = m ? m[0] : text;
+      showToast('آدرس سرور پیست شد ✅');
+    } catch (e) {
+      input.focus();
+      input.select();
+      showToast('پیست خودکار ممکن نشد؛ انگشت را روی کادر نگه دارید و Paste بزنید.');
+    }
   }
 
   function getWsUrl(room) {
@@ -417,7 +434,8 @@
     localStorage.setItem('signal_server', host);
 
     // اگر کاربر صریحاً ws:// یا http:// نوشته باشد (مثلاً سرور server.js روی شبکه محلی)، همان را رعایت کن
-    const explicitInsecure = /^(ws|http):\/\//i.test(host);
+    const explicitInsecure = /^(ws|http):\/\//i.test(host) ||
+      (!/^(wss|https):\/\//i.test(host) && /^(\d{1,3}(\.\d{1,3}){3}|localhost)(:\d+)?\/?$/i.test(host));
     // حذف پروتکل در صورت وارد کردن توسط کاربر
     host = host.replace(/^https?:\/\//, '').replace(/^wss?:\/\//, '').replace(/\/$/, '');
 
@@ -541,6 +559,9 @@
 
     // آدرس سرور سیگنالینگ
     const wsUrl = getWsUrl(room);
+    if (wsUrl.startsWith('ws:') && location.protocol === 'https:' && !isNativeApp()) {
+      showToast('⚠️ مرورگر اجازه اتصال به سرور بدون SSL (ws://) را از سایت https نمی‌دهد؛ از اپ اندروید یا آدرس wss استفاده کنید.');
+    }
 
     try {
       ws = new WebSocket(wsUrl);
@@ -864,7 +885,9 @@
   function copyRoomLink() {
     const rawRoom = document.getElementById('room').value.trim();
     const room = rawRoom || 'public';
-    const link = `${location.origin}${location.pathname}?room=${encodeURIComponent(room)}`;
+    const srv = (document.getElementById('custom-server').value || '').trim();
+    const base = isNativeApp() ? 'https://javadxpro.github.io/TCP/' : `${location.origin}${location.pathname}`;
+    const link = `${base}?room=${encodeURIComponent(room)}${srv ? '&server=' + encodeURIComponent(srv) : ''}`;
 
     if (navigator.clipboard) {
       navigator.clipboard.writeText(link).then(() => {
