@@ -1,0 +1,11 @@
+{
+  "appId": "com.javadxpro.tcp",
+  "appName": "TCP Voice",
+  "webDir": "www",
+  "android": {
+    "allowMixedContent": true
+  },
+  "server": {
+    "androidScheme": "https"
+  }
+}

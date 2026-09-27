@@ -6,9 +6,16 @@
   "scripts": {
     "dev": "wrangler dev --ip 0.0.0.0 --port 8787",
     "deploy": "wrangler deploy",
-    "test": "node --check index.js"
+    "test": "node --check index.js",
+    "build:web": "node scripts/build-web.mjs",
+    "cap:sync": "npm run build:web && npx cap sync android"
   },
   "devDependencies": {
+    "@capacitor/cli": "^7.6.9",
     "wrangler": "^3.114.17"
+  },
+  "dependencies": {
+    "@capacitor/android": "^7.6.9",
+    "@capacitor/core": "^7.6.9"
   }
 }

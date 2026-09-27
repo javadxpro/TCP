@@ -294,7 +294,7 @@
       </div>
       <div style="display: flex; gap: 6px;">
         <button class="btn btn-secondary btn-icon" onclick="copyRoomLink()" title="کپی لینک دعوت">🔗 کپی لینک</button>
-        <button class="btn btn-secondary btn-icon" onclick="location.reload()" title="خروج از اتاق">خروج</button>
+        <button class="btn btn-secondary btn-icon" onclick="leaveRoom()" title="خروج از اتاق">خروج</button>
       </div>
     </div>
 
@@ -379,12 +379,30 @@
     const customServerInput = document.getElementById('custom-server');
     if (savedServer) {
       customServerInput.value = savedServer;
-    } else if (location.hostname.endsWith('github.io')) {
+    } else if (location.hostname.endsWith('github.io') || isNativeApp()) {
       customServerInput.value = 'tcp.javadxpro.workers.dev';
     } else {
       customServerInput.value = location.host;
     }
   });
+
+  // --- اپلیکیشن اندروید (Capacitor) ---
+  function isNativeApp() {
+    return !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
+  }
+  function nativeVoiceService() {
+    return isNativeApp() && window.Capacitor.Plugins ? window.Capacitor.Plugins.VoiceService : null;
+  }
+  async function startNativeVoiceService(room) {
+    const svc = nativeVoiceService();
+    if (!svc) return;
+    try { await svc.start({ room }); } catch (e) { console.warn('VoiceService:', e); }
+  }
+  async function leaveRoom() {
+    const svc = nativeVoiceService();
+    if (svc) { try { await svc.stop(); } catch (e) {} }
+    location.reload();
+  }
 
   function toggleServerConfig() {
     const box = document.getElementById('server-config-box');
@@ -398,10 +416,12 @@
     // ذخیره در localStorage برای دفعات بعد
     localStorage.setItem('signal_server', host);
 
+    // اگر کاربر صریحاً ws:// یا http:// نوشته باشد (مثلاً سرور server.js روی شبکه محلی)، همان را رعایت کن
+    const explicitInsecure = /^(ws|http):\/\//i.test(host);
     // حذف پروتکل در صورت وارد کردن توسط کاربر
     host = host.replace(/^https?:\/\//, '').replace(/^wss?:\/\//, '').replace(/\/$/, '');
 
-    const protocol = (location.protocol === 'https:' || host.includes('workers.dev')) ? 'wss:' : 'ws:';
+    const protocol = explicitInsecure ? 'ws:' : ((location.protocol === 'https:' || host.includes('workers.dev')) ? 'wss:' : 'ws:');
     return `${protocol}//${host}/ws?room=${encodeURIComponent(room)}`;
   }
 
@@ -513,6 +533,7 @@
         }
       });
       setupAudioMeter('my-card', localStream);
+      startNativeVoiceService(room);
     } catch (err) {
       console.warn("عدم دسترسی به میکروفون:", err);
       showToast("میکروفون فعال نشد. فقط صدا را می‌شنوید.");
