@@ -19,22 +19,26 @@ export default {
       });
     }
 
-    // ۳. مسیر اتصال WebSocket
+    // ۳. مسیر اتصال WebSocket برای چت و سیگنالینگ WebRTC
     if (url.pathname === '/ws') {
-      const roomId = url.searchParams.get('room') || 'default';
+      // اتاق پیش‌فرض "public" (اتاق عمومی گیمرها) است
+      const rawRoom = url.searchParams.get('room');
+      const roomId = (rawRoom && rawRoom.trim()) ? rawRoom.trim().toLowerCase() : 'public';
       const id = env.CHAT_ROOM.idFromName(roomId);
       const roomObject = env.CHAT_ROOM.get(id);
       return roomObject.fetch(request);
     }
 
-    // ۴. سرو کردن فرانت‌اند اصلی
+    // ۴. سرو کردن رابط کاربری اصلی فرانت‌اند
     return new Response(htmlContent, {
       headers: { 'content-type': 'text/html;charset=UTF-8' },
     });
   }
 };
 
-// --- کلاس مدیریت روم‌ها (Durable Object) ---
+// ==========================================
+// کلاس مدیریت روم‌ها (Cloudflare Durable Object)
+// ==========================================
 export class ChatRoom {
   constructor(state, env) {
     this.state = state;
@@ -42,14 +46,18 @@ export class ChatRoom {
 
   async fetch(request) {
     if (request.headers.get('Upgrade') !== 'websocket') {
-      return new Response('Expected WebSocket', { status: 426 });
+      return new Response('Expected WebSocket upgrade', { status: 426 });
     }
 
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair);
 
-    const peerId = 'user_' + Math.random().toString(36).substring(2, 7);
+    // ایجاد یک شناسه یکتا برای کلاینت جدید
+    const peerId = 'p_' + Math.random().toString(36).substring(2, 9);
     this.state.acceptWebSocket(server, [peerId]);
+
+    // ارسال بلافاصله شناسه اختصاصی به کاربر متصل‌شده
+    server.send(JSON.stringify({ type: 'init', peerId }));
 
     return new Response(null, { status: 101, webSocket: client });
   }
@@ -61,16 +69,29 @@ export class ChatRoom {
     let data;
     try {
       data = JSON.parse(message);
-    } catch(e) { return; }
+    } catch (e) {
+      return;
+    }
 
+    // ثبت فرستنده پیام به عنوان شناسه امن سروری
     data.sender = peerId;
 
-    // ارسال پیام برای بقیه اعضای روم
-    for (const socket of this.state.getWebSockets()) {
-      if (socket !== ws) {
+    // ۱. اگر پیام برای فرد خاصی باشد (نظیر offer, answer, ice, welcome)
+    if (data.target) {
+      const targetSockets = this.state.getWebSockets(data.target);
+      for (const socket of targetSockets) {
         try {
           socket.send(JSON.stringify(data));
         } catch (e) {}
+      }
+    } else {
+      // ۲. پیام‌های عمومی برای همه اعضای اتاق به جز خود فرستنده (نظیر join, chat, mute-status)
+      for (const socket of this.state.getWebSockets()) {
+        if (socket !== ws) {
+          try {
+            socket.send(JSON.stringify(data));
+          } catch (e) {}
+        }
       }
     }
   }
@@ -79,6 +100,7 @@ export class ChatRoom {
     const tags = this.state.getTags(ws);
     const peerId = tags[0];
 
+    // اطلاع‌رسانی خروج کاربر به تمام حاضرین اتاق
     for (const socket of this.state.getWebSockets()) {
       if (socket !== ws) {
         try {
@@ -89,70 +111,321 @@ export class ChatRoom {
   }
 }
 
-// --- کد فرانت‌اند HTML/CSS/JS ---
+// ==========================================
+// کدهای فرانت‌اند (HTML/CSS/JS)
+// ==========================================
 const htmlContent = `<!DOCTYPE html>
 <html lang="fa" dir="rtl">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="theme-color" content="#0f172a">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#090d16">
   <link rel="manifest" href="/manifest.json">
   <link rel="icon" type="image/svg+xml" href="/icon.svg">
-  <title>🎮 چت و ویس گیمینگ چندنفره</title>
+  <title>🎮 چت و ویس روم گیمینگ</title>
   <style>
-    * { box-sizing: border-box; font-family: system-ui, -apple-system, sans-serif; }
-    body { background: #0f172a; color: #f8fafc; margin: 0; padding: 20px; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
-    .card { width: 100%; max-width: 500px; background: #1e293b; padding: 20px; border-radius: 14px; box-shadow: 0 8px 20px rgba(0,0,0,0.4); }
-    h2 { text-align: center; margin-top: 0; color: #38bdf8; font-size: 20px; display: flex; align-items: center; justify-content: center; gap: 8px; }
-    .flex { display: flex; gap: 8px; margin-bottom: 12px; }
-    input, button { padding: 10px 14px; border-radius: 8px; border: 1px solid #334155; font-size: 14px; outline: none; }
-    input { background: #0f172a; color: #fff; flex: 1; }
-    button { background: #2563eb; color: #fff; border: none; cursor: pointer; font-weight: bold; }
-    button:hover { background: #1d4ed8; }
-    .btn-danger { background: #ef4444; }
-    .btn-danger:hover { background: #dc2626; }
-    .btn-success { background: #22c55e; }
-    .btn-success:hover { background: #16a34a; }
-    .section-title { font-size: 13px; color: #94a3b8; margin: 12px 0 6px 0; font-weight: 600; display: flex; justify-content: space-between; }
-    #peers-list { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
-    .peer-chip { background: #0f172a; border: 1px solid #334155; padding: 4px 10px; border-radius: 20px; font-size: 12px; color: #38bdf8; }
-    #chat-box { height: 200px; background: #0f172a; border-radius: 8px; padding: 10px; overflow-y: auto; border: 1px solid #334155; margin-bottom: 10px; display: flex; flex-direction: column; gap: 6px; }
+    :root {
+      --bg-dark: #090d16;
+      --card-bg: #111827;
+      --panel-bg: #1e293b;
+      --input-bg: #0b1120;
+      --border-color: #334155;
+      --primary: #38bdf8;
+      --primary-hover: #0284c7;
+      --success: #22c55e;
+      --success-glow: rgba(34, 197, 94, 0.45);
+      --danger: #ef4444;
+      --danger-hover: #dc2626;
+      --warning: #f59e0b;
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; }
+    body { background-color: var(--bg-dark); color: var(--text); min-height: 100vh; display: flex; justify-content: center; align-items: center; padding: 16px; }
+
+    .app-card {
+      width: 100%;
+      max-width: 520px;
+      background: var(--card-bg);
+      border: 1px solid var(--border-color);
+      border-radius: 20px;
+      padding: 24px;
+      box-shadow: 0 16px 36px rgba(0, 0, 0, 0.6);
+      position: relative;
+    }
+
+    /* Header */
+    .header { text-align: center; margin-bottom: 20px; }
+    .header h1 { font-size: 22px; color: var(--primary); display: flex; align-items: center; justify-content: center; gap: 10px; font-weight: 800; }
+    .header p { font-size: 13px; color: var(--text-muted); margin-top: 6px; }
+
+    /* Inputs & Buttons */
+    .form-group { margin-bottom: 14px; text-align: right; }
+    .form-label { font-size: 13px; font-weight: 600; color: var(--text-muted); margin-bottom: 6px; display: block; }
+    .input-field {
+      width: 100%;
+      padding: 12px 14px;
+      background: var(--input-bg);
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      color: #fff;
+      font-size: 14px;
+      outline: none;
+      transition: all 0.2s;
+    }
+    .input-field:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.2); }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      padding: 11px 16px;
+      border-radius: 10px;
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+      border: none;
+      transition: all 0.2s;
+      user-select: none;
+    }
+    .btn:active { transform: scale(0.97); }
+    .btn-primary { background: linear-gradient(135deg, #0284c7, #2563eb); color: #fff; width: 100%; padding: 14px; font-size: 15px; border-radius: 12px; }
+    .btn-primary:hover { background: linear-gradient(135deg, #0369a1, #1d4ed8); }
+    .btn-success { background: #15803d; color: #fff; }
+    .btn-success:hover { background: #166534; }
+    .btn-danger { background: #dc2626; color: #fff; }
+    .btn-danger:hover { background: #b91c1c; }
+    .btn-secondary { background: var(--panel-bg); color: var(--text); border: 1px solid var(--border-color); }
+    .btn-secondary:hover { background: #334155; }
+    .btn-icon { padding: 8px 12px; font-size: 13px; }
+
+    /* Mode selector */
+    .mode-selector { display: flex; gap: 8px; margin-bottom: 16px; }
+    .mode-btn { flex: 1; padding: 10px; font-size: 12px; border-radius: 10px; border: 1px solid var(--border-color); background: var(--input-bg); color: var(--text-muted); cursor: pointer; text-align: center; }
+    .mode-btn.active { border-color: var(--primary); background: rgba(56, 189, 248, 0.12); color: var(--primary); font-weight: bold; }
+
+    /* In-room Topbar */
+    .room-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding-bottom: 14px;
+      margin-bottom: 14px;
+      border-bottom: 1px solid var(--border-color);
+    }
+    .room-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(34, 197, 94, 0.1);
+      color: var(--success);
+      padding: 4px 10px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 700;
+      border: 1px solid rgba(34, 197, 94, 0.3);
+    }
+
+    /* Voice Actions */
+    .voice-actions { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 8px; margin-bottom: 14px; }
+
+    /* Push To Talk Touch Button */
+    #ptt-touch-btn {
+      display: none;
+      width: 100%;
+      margin-bottom: 12px;
+      padding: 16px;
+      background: #334155;
+      color: #fff;
+      font-size: 15px;
+      font-weight: bold;
+      border-radius: 12px;
+      text-align: center;
+      cursor: pointer;
+      user-select: none;
+      touch-action: none;
+    }
+    #ptt-touch-btn.active {
+      background: #16a34a;
+      box-shadow: 0 0 16px var(--success-glow);
+    }
+
+    /* Active Peers Grid */
+    .section-title { font-size: 12px; color: var(--text-muted); font-weight: 700; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; }
+    .peers-container {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 8px;
+      margin-bottom: 14px;
+      max-height: 180px;
+      overflow-y: auto;
+    }
+    .peer-card {
+      background: var(--input-bg);
+      border: 1px solid var(--border-color);
+      border-radius: 10px;
+      padding: 8px 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      transition: all 0.2s ease-in-out;
+    }
+    .peer-card.speaking {
+      border-color: var(--success) !important;
+      box-shadow: 0 0 10px var(--success-glow);
+      background: rgba(34, 197, 94, 0.08);
+    }
+    .peer-info { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; }
+    .peer-volume-control { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+    .peer-volume-control input[type="range"] {
+      width: 70px;
+      accent-color: var(--primary);
+      cursor: pointer;
+    }
+
+    /* Chat Area */
+    .chat-box {
+      height: 170px;
+      background: var(--input-bg);
+      border: 1px solid var(--border-color);
+      border-radius: 10px;
+      padding: 10px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      margin-bottom: 10px;
+    }
     .msg { font-size: 13px; line-height: 1.4; word-break: break-word; }
-    .msg .sender { font-weight: bold; color: #38bdf8; margin-left: 4px; }
+    .msg .sender { color: var(--primary); font-weight: bold; margin-left: 4px; }
     .msg.system { color: #64748b; font-style: italic; font-size: 12px; }
+
+    .chat-form { display: flex; gap: 8px; }
+
+    /* Toast Notification */
+    #toast {
+      position: absolute;
+      top: -15px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: #0284c7;
+      color: #fff;
+      padding: 6px 14px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: bold;
+      opacity: 0;
+      pointer-events: none;
+      transition: all 0.3s ease;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+      z-index: 99;
+      white-space: nowrap;
+    }
+    #toast.show { top: 12px; opacity: 1; }
+
+    /* Scrollbars */
+    ::-webkit-scrollbar { width: 5px; height: 5px; }
+    ::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
   </style>
 </head>
 <body>
 
-<div class="card" onclick="enableAudioPlayback()">
-  <h2><img src="/icon.svg" width="28" height="28"> چت و ویس گیمینگ</h2>
+<div id="toast">پیام سیستم</div>
 
-  <div id="join-form" class="flex">
-    <input id="username" placeholder="نام شما" value="بازیکن ۱">
-    <input id="room" placeholder="روم" value="team1" style="max-width: 100px;">
-    <button onclick="connect()">ورود</button>
+<div class="app-card" onclick="enableAudioPlayback()">
+  <!-- نمای ورود به اتاق -->
+  <div id="join-section">
+    <div class="header">
+      <h1><img src="/icon.svg" width="30" height="30" alt="Logo"> چت صوتی گیمینگ</h1>
+      <p>بدون نیاز به نرم‌افزار، با دوستانت مستقیم در مرورگر صحبت کن</p>
+    </div>
+
+    <form onsubmit="handleJoinSubmit(event)">
+      <div class="form-group">
+        <label class="form-label">نام شما در بازی (الزامی):</label>
+        <input id="username" class="input-field" placeholder="مثلاً: سهراب یا GamerPro" autofocus autocomplete="off" maxlength="25">
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">اتاق گفت‌وگو:</label>
+        <input id="room" class="input-field" value="public" placeholder="نام اتاق">
+        <small style="color: var(--text-muted); font-size: 11px; margin-top: 4px; display: block;">
+          اتاق «public» اتاق عمومی مشترک برای همه است. برای روم اختصاصی اسمی دلخواه وارد کنید.
+        </small>
+      </div>
+
+      <label class="form-label">حالت میکروفون:</label>
+      <div class="mode-selector">
+        <div id="mode-voice" class="mode-btn active" onclick="switchMicMode('voice')">
+          🎙️ صدای خودکار (آزاد)
+        </div>
+        <div id="mode-ptt" class="mode-btn" onclick="switchMicMode('ptt')">
+          🔘 کلید فشاری (Push-to-Talk)
+        </div>
+      </div>
+
+      <button type="submit" class="btn btn-primary">
+        🚀 ورود به روم و فعال‌سازی صدا
+      </button>
+    </form>
   </div>
 
-  <div id="room-panel" style="display: none;">
-    <div class="flex" style="justify-content: space-between;">
-      <button id="mic-btn" class="btn-danger" onclick="toggleMic()">🎙️ میکروفون: خاموش</button>
-      <button class="btn-danger" style="background:#475569;" onclick="location.reload()">خروج</button>
+  <!-- نمای داخل اتاق چت و ویس -->
+  <div id="room-section" style="display: none;">
+    <div class="room-header">
+      <div>
+        <span class="room-badge" id="room-display">🟢 اتاق عمومی</span>
+      </div>
+      <div style="display: flex; gap: 6px;">
+        <button class="btn btn-secondary btn-icon" onclick="copyRoomLink()" title="کپی لینک دعوت">🔗 کپی لینک</button>
+        <button class="btn btn-secondary btn-icon" onclick="location.reload()" title="خروج از اتاق">خروج</button>
+      </div>
     </div>
 
+    <!-- دکمه‌های کنترل ویس -->
+    <div class="voice-actions">
+      <button id="mic-btn" class="btn btn-success" onclick="toggleMic()">
+        🎙️ میکروفون: باز
+      </button>
+      <button id="deafen-btn" class="btn btn-secondary" onclick="toggleDeafen()">
+        🔊 صدای بازی
+      </button>
+      <button id="ptt-mode-btn" class="btn btn-secondary" onclick="toggleMicMode()">
+        ⚙️ حالت: آزاد
+      </button>
+    </div>
+
+    <!-- دکمه نگه‌داشتن PTT مخصوص گوشی و تاچ -->
+    <div id="ptt-touch-btn">
+      🔘 نگه دارید تا صحبت کنید (یا کلید Space در کیبورد)
+    </div>
+
+    <!-- لیست حاضرین -->
     <div class="section-title">
-      <span>اعضای حاضر در روم:</span>
-      <span id="peer-count">1 نفر</span>
-    </div>
-    <div id="peers-list">
-      <div class="peer-chip">👤 شما (<span id="my-name"></span>)</div>
+      <span>👥 هم‌تیمی‌های حاضر:</span>
+      <span id="player-count">۱ نفر</span>
     </div>
 
-    <div class="section-title">💬 چت متنی</div>
-    <div id="chat-box"></div>
+    <div class="peers-container" id="peers-container">
+      <!-- کارت کاربر کنونی -->
+      <div class="peer-card" id="my-card">
+        <div class="peer-info">
+          <span id="my-mic-icon">🎙️</span>
+          <span>شما (<b id="my-name-display"></b>)</span>
+        </div>
+        <div style="font-size: 11px; color: var(--primary); font-weight: bold;">شما</div>
+      </div>
+    </div>
 
-    <form class="flex" onsubmit="sendMessage(event)">
-      <input id="chat-input" placeholder="پیام خود را بنویسید..." autocomplete="off">
-      <button type="submit">ارسال</button>
+    <!-- چت متنی گیمینگ -->
+    <div class="section-title">💬 چت متنی اتاق</div>
+    <div class="chat-box" id="chat-box"></div>
+
+    <form class="chat-form" onsubmit="handleSendChat(event)">
+      <input id="chat-input" class="input-field" placeholder="پیامی بنویسید... (Enter برای ارسال)" autocomplete="off">
+      <button type="submit" class="btn btn-secondary">ارسال</button>
     </form>
   </div>
 </div>
@@ -160,83 +433,219 @@ const htmlContent = `<!DOCTYPE html>
 <div id="audio-container"></div>
 
 <script>
-  let ws, localStream;
-  const peers = {};
+  let ws = null;
+  let myPeerId = null;
+  let myUsername = '';
+  let localStream = null;
+  let isMicMuted = false;
+  let isDeafened = false;
+  let micMode = 'voice'; // 'voice' or 'ptt'
+  let isPttPressed = false;
+  const peers = {}; // peerId -> { pc, name, muted, volume, audioEl }
+
   const rtcConfig = {
     iceServers: [
       { urls: 'stun:stun.l.google.com:19302' },
       { urls: 'stun:stun1.l.google.com:19302' },
+      { urls: 'stun:stun2.l.google.com:19302' },
+      { urls: 'stun:stun.cloudflare.com:3478' },
       { urls: 'stun:stun.services.mozilla.com' }
     ]
   };
 
-  function enableAudioPlayback() {
-    const audios = document.querySelectorAll('audio');
-    audios.forEach(a => a.play().catch(() => {}));
+  // خواندن پارامتر اتاق از URL در صورت وجود
+  window.addEventListener('DOMContentLoaded', () => {
+    const params = new URLSearchParams(window.location.search);
+    const roomParam = params.get('room');
+    if (roomParam && roomParam.trim()) {
+      document.getElementById('room').value = roomParam.trim();
+    }
+  });
+
+  function showToast(text) {
+    const toast = document.getElementById('toast');
+    toast.textContent = text;
+    toast.classList.add('show');
+    setTimeout(() => toast.classList.remove('show'), 3000);
   }
 
-  function connect() {
-    enableAudioPlayback();
-    const username = document.getElementById('username').value.trim() || 'بازیکن';
-    const room = document.getElementById('room').value.trim() || 'default';
-    document.getElementById('my-name').innerText = username;
+  function playSound(type) {
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      const t = ctx.currentTime;
 
+      if (type === 'join') {
+        osc.frequency.setValueAtTime(440, t);
+        osc.frequency.exponentialRampToValueAtTime(880, t + 0.12);
+        gain.gain.setValueAtTime(0.08, t);
+        gain.gain.linearRampToValueAtTime(0, t + 0.18);
+        osc.start(t);
+        osc.stop(t + 0.18);
+      } else if (type === 'leave') {
+        osc.frequency.setValueAtTime(600, t);
+        osc.frequency.exponentialRampToValueAtTime(300, t + 0.12);
+        gain.gain.setValueAtTime(0.08, t);
+        gain.gain.linearRampToValueAtTime(0, t + 0.18);
+        osc.start(t);
+        osc.stop(t + 0.18);
+      } else if (type === 'mute') {
+        osc.frequency.setValueAtTime(260, t);
+        gain.gain.setValueAtTime(0.06, t);
+        gain.gain.linearRampToValueAtTime(0, t + 0.08);
+        osc.start(t);
+        osc.stop(t + 0.08);
+      } else if (type === 'unmute') {
+        osc.frequency.setValueAtTime(520, t);
+        gain.gain.setValueAtTime(0.06, t);
+        gain.gain.linearRampToValueAtTime(0, t + 0.08);
+        osc.start(t);
+        osc.stop(t + 0.08);
+      }
+    } catch (e) {}
+  }
+
+  function enableAudioPlayback() {
+    const audios = document.querySelectorAll('audio');
+    audios.forEach(a => {
+      if (a.paused) a.play().catch(() => {});
+    });
+  }
+
+  function switchMicMode(mode) {
+    micMode = mode;
+    document.getElementById('mode-voice').classList.toggle('active', mode === 'voice');
+    document.getElementById('mode-ptt').classList.toggle('active', mode === 'ptt');
+  }
+
+  function toggleMicMode() {
+    switchMicMode(micMode === 'voice' ? 'ptt' : 'voice');
+    updatePttUI();
+  }
+
+  function updatePttUI() {
+    const btn = document.getElementById('ptt-mode-btn');
+    const touchBtn = document.getElementById('ptt-touch-btn');
+    if (micMode === 'ptt') {
+      btn.innerText = '⚙️ حالت: PTT (کلیدی)';
+      touchBtn.style.display = 'block';
+      setMicMuted(true);
+      showToast("حالت فشاری (PTT) فعال شد. کلید Space را نگه دارید.");
+    } else {
+      btn.innerText = '⚙️ حالت: آزاد';
+      touchBtn.style.display = 'none';
+      setMicMuted(false);
+      showToast("حالت آزاد فعال شد. صدا دائم باز است.");
+    }
+  }
+
+  async function handleJoinSubmit(e) {
+    e.preventDefault();
+    const usernameInput = document.getElementById('username');
+    const name = usernameInput.value.trim();
+
+    if (!name) {
+      alert("لطفاً نام مستعار خود را در بازی وارد کنید!");
+      usernameInput.focus();
+      return;
+    }
+
+    myUsername = name;
+    document.getElementById('my-name-display').textContent = myUsername;
+
+    const rawRoom = document.getElementById('room').value.trim();
+    const room = rawRoom || 'public';
+    document.getElementById('room-display').textContent = room === 'public' ? '🟢 اتاق عمومی' : \`🟢 \${room}\`;
+
+    // دریافت دسترسی میکروفون
+    try {
+      localStream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true
+        }
+      });
+      setupAudioMeter('my-card', localStream);
+    } catch (err) {
+      console.warn("عدم دسترسی به میکروفون:", err);
+      showToast("میکروفون فعال نشد. فقط صدا را می‌شنوید.");
+    }
+
+    // اتصال وب‌سوکت
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    ws = new WebSocket(\`\${protocol}//\${location.host}/ws?room=\${room}\`);
+    ws = new WebSocket(\`\${protocol}//\${location.host}/ws?room=\${encodeURIComponent(room)}\`);
 
     ws.onopen = () => {
-      document.getElementById('join-form').style.display = 'none';
-      document.getElementById('room-panel').style.display = 'block';
-      addSystemMsg(\`وارد روم [\${room}] شدید.\`);
-      ws.send(JSON.stringify({ type: 'join', name: username }));
+      document.getElementById('join-section').style.display = 'none';
+      document.getElementById('room-section').style.display = 'block';
+      updatePttUI();
+      addSystemMsg(\`وارد اتاق [\${room === 'public' ? 'عمومی' : room}] شدید.\`);
     };
 
     ws.onmessage = async (e) => {
-      const msg = JSON.parse(e.data);
+      let msg;
+      try { msg = JSON.parse(e.data); } catch (err) { return; }
       handleSignalMessage(msg);
     };
 
-    ws.onclose = () => addSystemMsg("اتصال قطع شد.");
+    ws.onclose = () => {
+      addSystemMsg("اتصال به سرور قطع شد. در حال تلاش برای اتصال مجدد...");
+    };
   }
 
   async function handleSignalMessage(msg) {
     const sender = msg.sender;
 
     switch (msg.type) {
+      case 'init':
+        myPeerId = msg.peerId;
+        // پس از دریافت شناسه، پیام join را به همه حاضرین اتاق می‌فرستیم
+        ws.send(JSON.stringify({ type: 'join', name: myUsername, muted: isMicMuted }));
+        break;
+
       case 'join':
-        addSystemMsg(\`\${msg.name} وارد شد.\`);
-        ws.send(JSON.stringify({ type: 'welcome', name: document.getElementById('username').value }));
-        updatePeerList(sender, msg.name);
-        initPeerConnection(sender, msg.name, true);
+        // یک بازیکن جدید وارد شد!
+        addSystemMsg(\`🎮 \${msg.name} وارد بازی شد.\`);
+        playSound('join');
+        updatePeerUI(sender, msg.name, msg.muted);
+
+        // مشخصات خود را به بازیکن جدید معرفی می‌کنیم
+        ws.send(JSON.stringify({ type: 'welcome', target: sender, name: myUsername, muted: isMicMuted }));
+
+        // بازیکن حاضر، نقش Offer-دهنده را بر عهده می‌گیرد
+        initiatePeerOffer(sender, msg.name);
         break;
 
       case 'welcome':
-        updatePeerList(sender, msg.name);
-        initPeerConnection(sender, msg.name, false);
+        // دریافت مشخصات بازیکنی که قبل از ما در روم بوده است
+        updatePeerUI(sender, msg.name, msg.muted);
+        break;
+
+      case 'offer':
+        if (msg.target && msg.target !== myPeerId) return;
+        handleRemoteOffer(sender, msg.name, msg.sdp);
+        break;
+
+      case 'answer':
+        if (msg.target && msg.target !== myPeerId) return;
+        handleRemoteAnswer(sender, msg.sdp);
+        break;
+
+      case 'ice':
+        if (msg.target && msg.target !== myPeerId) return;
+        handleRemoteIce(sender, msg.candidate);
+        break;
+
+      case 'mute-status':
+        setPeerMuteState(sender, msg.muted);
         break;
 
       case 'chat':
         addChatMsg(msg.name, msg.text);
-        break;
-
-      case 'offer':
-        const pc = initPeerConnection(sender, msg.name, false);
-        await pc.setRemoteDescription(new RTCSessionDescription(msg.sdp));
-        const answer = await pc.createAnswer();
-        await pc.setLocalDescription(answer);
-        ws.send(JSON.stringify({ type: 'answer', target: sender, sdp: answer }));
-        break;
-
-      case 'answer':
-        if (peers[sender]?.pc) {
-          await peers[sender].pc.setRemoteDescription(new RTCSessionDescription(msg.sdp));
-        }
-        break;
-
-      case 'ice':
-        if (peers[sender]?.pc) {
-          try { await peers[sender].pc.addIceCandidate(new RTCIceCandidate(msg.candidate)); } catch (e) {}
-        }
         break;
 
       case 'peer-left':
@@ -245,15 +654,25 @@ const htmlContent = `<!DOCTYPE html>
     }
   }
 
-  function initPeerConnection(peerId, peerName, isInitiator) {
+  function getOrCreatePeerConnection(peerId, peerName) {
     if (peers[peerId]?.pc) return peers[peerId].pc;
 
     const pc = new RTCPeerConnection(rtcConfig);
-    peers[peerId] = { pc, name: peerName };
+    peers[peerId] = { pc, name: peerName, volume: 1, audioEl: null };
 
     if (localStream) {
       localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
     }
+
+    pc.onicecandidate = (event) => {
+      if (event.candidate && ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({
+          type: 'ice',
+          target: peerId,
+          candidate: event.candidate
+        }));
+      }
+    };
 
     pc.ontrack = (event) => {
       let audioEl = document.getElementById(\`audio-\${peerId}\`);
@@ -265,65 +684,239 @@ const htmlContent = `<!DOCTYPE html>
         document.getElementById('audio-container').appendChild(audioEl);
       }
       audioEl.srcObject = event.streams[0];
-      audioEl.play().catch(e => console.log("Autoplay check:", e));
-    };
+      audioEl.muted = isDeafened;
+      audioEl.play().catch(e => console.log("Autoplay:", e));
+      peers[peerId].audioEl = audioEl;
 
-    pc.onicecandidate = (event) => {
-      if (event.candidate) {
-        ws.send(JSON.stringify({ type: 'ice', target: peerId, candidate: event.candidate }));
-      }
+      setupAudioMeter(\`peer-\${peerId}\`, event.streams[0]);
     };
-
-    if (isInitiator) {
-      pc.createOffer().then(offer => {
-        pc.setLocalDescription(offer);
-        ws.send(JSON.stringify({ type: 'offer', target: peerId, sdp: offer, name: document.getElementById('username').value }));
-      });
-    }
 
     return pc;
   }
 
-  async function toggleMic() {
-    enableAudioPlayback();
-    const btn = document.getElementById('mic-btn');
-
-    if (!localStream) {
-      try {
-        localStream = await navigator.mediaDevices.getUserMedia({ 
-          audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } 
-        });
-        btn.innerText = "🎙️ میکروفون: روشن";
-        btn.className = "btn-success";
-
-        Object.keys(peers).forEach(peerId => {
-          const pc = peers[peerId].pc;
-          localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
-          pc.createOffer().then(offer => {
-            pc.setLocalDescription(offer);
-            ws.send(JSON.stringify({ type: 'offer', target: peerId, sdp: offer, name: document.getElementById('username').value }));
-          });
-        });
-
-      } catch (err) {
-        alert("خطا در دسترسی به میکروفون!");
-      }
-    } else {
-      localStream.getTracks().forEach(track => track.stop());
-      localStream = null;
-      btn.innerText = "🎙️ میکروفون: خاموش";
-      btn.className = "btn-danger";
+  async function initiatePeerOffer(peerId, peerName) {
+    const pc = getOrCreatePeerConnection(peerId, peerName);
+    try {
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      ws.send(JSON.stringify({
+        type: 'offer',
+        target: peerId,
+        sdp: offer,
+        name: myUsername
+      }));
+    } catch (e) {
+      console.error("Offer error:", e);
     }
   }
 
-  function sendMessage(e) {
+  async function handleRemoteOffer(peerId, peerName, sdp) {
+    const pc = getOrCreatePeerConnection(peerId, peerName);
+    try {
+      await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      ws.send(JSON.stringify({
+        type: 'answer',
+        target: peerId,
+        sdp: answer
+      }));
+    } catch (e) {
+      console.error("Answer error:", e);
+    }
+  }
+
+  async function handleRemoteAnswer(peerId, sdp) {
+    const peer = peers[peerId];
+    if (peer && peer.pc) {
+      try {
+        await peer.pc.setRemoteDescription(new RTCSessionDescription(sdp));
+      } catch (e) {
+        console.error("SetRemote error:", e);
+      }
+    }
+  }
+
+  async function handleRemoteIce(peerId, candidate) {
+    const peer = peers[peerId];
+    if (peer && peer.pc && candidate) {
+      try {
+        await peer.pc.addIceCandidate(new RTCIceCandidate(candidate));
+      } catch (e) {}
+    }
+  }
+
+  // کنترل میکروفون با track.enabled بدون برهم زدن اتصال WebRTC
+  function toggleMic() {
+    setMicMuted(!isMicMuted);
+  }
+
+  function setMicMuted(muted) {
+    isMicMuted = muted;
+    if (localStream) {
+      localStream.getAudioTracks().forEach(t => t.enabled = !isMicMuted);
+    }
+
+    const btn = document.getElementById('mic-btn');
+    const myMic = document.getElementById('my-mic-icon');
+
+    if (isMicMuted) {
+      btn.className = 'btn btn-danger';
+      btn.innerText = '🔇 میکروفون: بسته';
+      myMic.innerText = '🔇';
+      playSound('mute');
+    } else {
+      btn.className = 'btn btn-success';
+      btn.innerText = '🎙️ میکروفون: باز';
+      myMic.innerText = '🎙️';
+      playSound('unmute');
+    }
+
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'mute-status', muted: isMicMuted }));
+    }
+  }
+
+  function toggleDeafen() {
+    isDeafened = !isDeafened;
+    const btn = document.getElementById('deafen-btn');
+    const audios = document.querySelectorAll('#audio-container audio');
+    audios.forEach(a => a.muted = isDeafened);
+
+    if (isDeafened) {
+      btn.className = 'btn btn-danger';
+      btn.innerText = '🔈 صدا: قطع';
+      showToast("صدای سایر بازیکنان قطع شد.");
+    } else {
+      btn.className = 'btn btn-secondary';
+      btn.innerText = '🔊 صدای بازی';
+      showToast("صدای سایر بازیکنان وصل شد.");
+    }
+  }
+
+  function setPeerVolume(peerId, val) {
+    const audio = document.getElementById(\`audio-\${peerId}\`);
+    if (audio) {
+      audio.volume = parseFloat(val);
+    }
+  }
+
+  function setPeerMuteState(peerId, muted) {
+    const icon = document.getElementById(\`peer-mic-\${peerId}\`);
+    if (icon) icon.innerText = muted ? '🔇' : '🎙️';
+    if (peers[peerId]) peers[peerId].muted = muted;
+  }
+
+  // نشانگر هوشمند چه کسی در حال صحبت است (Glowing Effect)
+  function setupAudioMeter(elementId, stream) {
+    try {
+      const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const source = audioCtx.createMediaStreamSource(stream);
+      const analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 256;
+      analyser.smoothingTimeConstant = 0.4;
+      source.connect(analyser);
+
+      const dataArray = new Uint8Array(analyser.frequencyBinCount);
+      let speakingTimer = null;
+
+      function monitor() {
+        analyser.getByteFrequencyData(dataArray);
+        let sum = 0;
+        for (let i = 0; i < dataArray.length; i++) sum += dataArray[i];
+        const avg = sum / dataArray.length;
+
+        const el = document.getElementById(elementId);
+        if (el) {
+          if (avg > 18) {
+            el.classList.add('speaking');
+            if (speakingTimer) clearTimeout(speakingTimer);
+            speakingTimer = setTimeout(() => el.classList.remove('speaking'), 350);
+          }
+        }
+        requestAnimationFrame(monitor);
+      }
+      monitor();
+    } catch (e) {}
+  }
+
+  function updatePeerUI(peerId, peerName, muted) {
+    if (document.getElementById(\`peer-\${peerId}\`)) return;
+
+    const container = document.getElementById('peers-container');
+    const card = document.createElement('div');
+    card.className = 'peer-card';
+    card.id = \`peer-\${peerId}\`;
+
+    const info = document.createElement('div');
+    info.className = 'peer-info';
+
+    const micSpan = document.createElement('span');
+    micSpan.id = \`peer-mic-\${peerId}\`;
+    micSpan.innerText = muted ? '🔇' : '🎙️';
+
+    const nameSpan = document.createElement('span');
+    nameSpan.textContent = peerName || 'بازیکن';
+
+    info.appendChild(micSpan);
+    info.appendChild(nameSpan);
+
+    const volControl = document.createElement('div');
+    volControl.className = 'peer-volume-control';
+    volControl.innerHTML = \`
+      <span>🔊</span>
+      <input type="range" min="0" max="1" step="0.05" value="1" title="تنظیم صدای این دوست" oninput="setPeerVolume('\${peerId}', this.value)">
+    \`;
+
+    card.appendChild(info);
+    card.appendChild(volControl);
+    container.appendChild(card);
+
+    updatePlayerCount();
+  }
+
+  function removePeer(peerId) {
+    if (peers[peerId]) {
+      if (peers[peerId].pc) peers[peerId].pc.close();
+      delete peers[peerId];
+    }
+    const card = document.getElementById(\`peer-\${peerId}\`);
+    if (card) card.remove();
+    const audio = document.getElementById(\`audio-\${peerId}\`);
+    if (audio) audio.remove();
+
+    playSound('leave');
+    updatePlayerCount();
+  }
+
+  function updatePlayerCount() {
+    const count = document.getElementById('peers-container').children.length;
+    document.getElementById('player-count').innerText = \`\${count} نفر\`;
+  }
+
+  // کپی لینک مستقیم برای پیوستن دوستان
+  function copyRoomLink() {
+    const rawRoom = document.getElementById('room').value.trim();
+    const room = rawRoom || 'public';
+    const link = \`\${location.origin}/?room=\${encodeURIComponent(room)}\`;
+
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(link).then(() => {
+        showToast("لینک اتاق کپی شد! برای دوستانت ارسال کن.");
+      }).catch(() => prompt("لینک را کپی کنید:", link));
+    } else {
+      prompt("لینک را کپی کنید:", link);
+    }
+  }
+
+  // ارسال چت متنی
+  function handleSendChat(e) {
     e.preventDefault();
     const input = document.getElementById('chat-input');
     const text = input.value.trim();
-    const name = document.getElementById('username').value.trim();
 
     if (text && ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: 'chat', name, text }));
+      ws.send(JSON.stringify({ type: 'chat', name: myUsername, text }));
       addChatMsg('شما', text);
       input.value = '';
     }
@@ -333,7 +926,16 @@ const htmlContent = `<!DOCTYPE html>
     const box = document.getElementById('chat-box');
     const div = document.createElement('div');
     div.className = 'msg';
-    div.innerHTML = \`<span class="sender">\${sender}:</span> \${escapeHtml(text)}\`;
+
+    const senderSpan = document.createElement('span');
+    senderSpan.className = 'sender';
+    senderSpan.textContent = sender + ': ';
+
+    const textSpan = document.createElement('span');
+    textSpan.textContent = text;
+
+    div.appendChild(senderSpan);
+    div.appendChild(textSpan);
     box.appendChild(div);
     box.scrollTop = box.scrollHeight;
   }
@@ -342,38 +944,62 @@ const htmlContent = `<!DOCTYPE html>
     const box = document.getElementById('chat-box');
     const div = document.createElement('div');
     div.className = 'msg system';
-    div.innerText = \`• \${text}\`;
+    div.textContent = '• ' + text;
     box.appendChild(div);
     box.scrollTop = box.scrollHeight;
   }
 
-  function updatePeerList(peerId, peerName) {
-    if (!document.getElementById(\`peer-\${peerId}\`)) {
-      const list = document.getElementById('peers-list');
-      const chip = document.createElement('div');
-      chip.className = 'peer-chip';
-      chip.id = \`peer-\${peerId}\`;
-      chip.innerText = \`👤 \${peerName}\`;
-      list.appendChild(chip);
-      document.getElementById('peer-count').innerText = \`\${list.children.length} نفر\`;
-    }
-  }
+  // کلیدهای میانبر گیمینگ (M برای مات کردن و Space برای PTT)
+  window.addEventListener('keydown', (e) => {
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
 
-  function removePeer(peerId) {
-    if (peers[peerId]) {
-      if (peers[peerId].pc) peers[peerId].pc.close();
-      delete peers[peerId];
+    // کلید M برای قطع/وصل سریع میکروفون
+    if (e.key === 'm' || e.key === 'M' || e.key === 'ئ') {
+      toggleMic();
     }
-    const chip = document.getElementById(\`peer-\${peerId}\`);
-    if (chip) chip.remove();
-    const audioEl = document.getElementById(\`audio-\${peerId}\`);
-    if (audioEl) audioEl.remove();
-    document.getElementById('peer-count').innerText = \`\${document.getElementById('peers-list').children.length} نفر\`;
-  }
 
-  function escapeHtml(str) {
-    return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  }
+    // نگه‌داشتن Space برای Push-to-Talk
+    if (micMode === 'ptt' && (e.code === 'Space' || e.key === 'v' || e.key === 'V')) {
+      if (!isPttPressed) {
+        isPttPressed = true;
+        setMicMuted(false);
+        const myCard = document.getElementById('my-card');
+        if (myCard) myCard.classList.add('speaking');
+      }
+      e.preventDefault();
+    }
+  });
+
+  window.addEventListener('keyup', (e) => {
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+    if (micMode === 'ptt' && (e.code === 'Space' || e.key === 'v' || e.key === 'V')) {
+      if (isPttPressed) {
+        isPttPressed = false;
+        setMicMuted(true);
+        const myCard = document.getElementById('my-card');
+        if (myCard) myCard.classList.remove('speaking');
+      }
+      e.preventDefault();
+    }
+  });
+
+  // پشتیبانی از تاچ نگه‌داشتن PTT در موبایل
+  const pttTouch = document.getElementById('ptt-touch-btn');
+  const startPttTouch = (e) => {
+    e.preventDefault();
+    pttTouch.classList.add('active');
+    setMicMuted(false);
+  };
+  const endPttTouch = (e) => {
+    e.preventDefault();
+    pttTouch.classList.remove('active');
+    setMicMuted(true);
+  };
+  pttTouch.addEventListener('mousedown', startPttTouch);
+  pttTouch.addEventListener('mouseup', endPttTouch);
+  pttTouch.addEventListener('touchstart', startPttTouch, { passive: false });
+  pttTouch.addEventListener('touchend', endPttTouch, { passive: false });
 </script>
 </body>
 </html>`;
