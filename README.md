@@ -76,3 +76,21 @@ npm run deploy
 - **بیلد محلی:** `npm ci && npm run cap:sync && cd android && ./gradlew assembleDebug` (نیازمند JDK 21 و Android SDK).
 - سرور پیش‌فرض داخل اپ `tcp.javadxpro.workers.dev` است و از دکمه تنظیمات سرور قابل تغییر است. برای سرور محلی بدون SSL آدرس را با `ws://IP:PORT` وارد کنید.
 - پیشنهاد: در تنظیمات گوشی، بهینه‌سازی باتری را برای اپ «TCP Voice» خاموش کنید.
+
+---
+
+## 📡 اجرای سرور سیگنالینگ روی گوشی (Termux)
+
+`server.js` بدون هیچ وابستگی (بدون `npm install`) اجرا می‌شود و پروتکلش دقیقاً مثل ورکر کلادفلر است. صفحه وب را هم روی `http://IP:PORT` سرو می‌کند.
+
+```bash
+pkg install -y nodejs git
+git clone -b arena/01a0e304-tcp https://github.com/javadxpro/TCP.git
+cd TCP
+bash termux-server.sh        # یا: node server.js  (پورت پیش‌فرض 8080)
+```
+
+- آدرس (مثلاً `192.168.43.1:8080`) در ترمینال چاپ می‌شود؛ با نصب **Termux:API** (`pkg install termux-api`) خودکار در کلیپ‌بورد هم کپی می‌شود.
+- دوستان آدرس را کپی کنند و اپ را باز کنند تا خودکار پر شود. در مرورگر هم می‌توانند مستقیم `http://IP:8080` را باز کنند.
+- همه باید در **یک شبکه** باشند (هات‌اسپات گوشی میزبان یا یک وای‌فای). برای اینترنت عمومی از تونل (مثلاً `cloudflared tunnel --url http://localhost:8080`) استفاده کنید و آدرس `…trycloudflare.com` را بدهید.
+- وضعیت سرور: `http://IP:8080/health`
