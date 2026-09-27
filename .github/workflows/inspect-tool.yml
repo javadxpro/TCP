@@ -1,5 +1,7 @@
 name: Inspect tool zip
-on: workflow_dispatch
+on:
+  push:
+    paths: [".github/workflows/inspect-tool.yml"]
 jobs:
   inspect:
     runs-on: ubuntu-latest
