@@ -62,6 +62,19 @@ public class VoiceServicePlugin extends Plugin {
         });
     }
 
+    /** نوشتن متن در کلیپ‌بورد (برای کپی آدرس سرور داخلی) */
+    @PluginMethod
+    public void writeClipboard(PluginCall call) {
+        String text = call.getString("text", "");
+        getActivity().runOnUiThread(() -> {
+            try {
+                ClipboardManager cm = (ClipboardManager) getContext().getSystemService(Context.CLIPBOARD_SERVICE);
+                if (cm != null) cm.setPrimaryClip(ClipData.newPlainText("tcp-voice", text));
+            } catch (Exception ignored) { }
+            call.resolve();
+        });
+    }
+
     @PluginMethod
     public void stop(PluginCall call) {
         getContext().stopService(new Intent(getContext(), VoiceForegroundService.class));

@@ -114,6 +114,29 @@
     .input-field.flash { box-shadow: 0 0 0 3px rgba(34,197,94,.6); transition: box-shadow .3s; }
     .server-hint { color: var(--text-muted); font-size: 11px; display: block; margin-top: 6px; }
 
+    /* Connection mode (server / mqtt / host) */
+    .conn-selector { display: flex; gap: 6px; margin-bottom: 12px; }
+    .conn-selector .mode-btn { padding: 9px 6px; font-size: 11.5px; }
+    .conn-panel { display: none; }
+    .conn-panel.active { display: block; }
+    .conn-badge { font-size: 10px; padding: 2px 6px; border-radius: 6px; background: rgba(245,158,11,.15); color: var(--warning); border: 1px solid rgba(245,158,11,.35); margin-right: 4px; }
+
+    /* In-app host terminal */
+    .host-box { background: var(--input-bg); border: 1px solid var(--border-color); border-radius: 12px; padding: 10px; }
+    .host-row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+    .host-row .input-field { flex: 1; min-width: 0; text-align: left; padding: 9px 12px; font-size: 13px; }
+    .host-addr { font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace; direction: ltr; text-align: left; font-size: 14px; font-weight: 700; color: var(--success); flex: 1; word-break: break-all; }
+    .terminal {
+      background: #020617; color: #86efac; border: 1px solid #1e293b; border-radius: 8px;
+      font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace; font-size: 11.5px; line-height: 1.5;
+      direction: ltr; text-align: left; height: 150px; overflow-y: auto; padding: 8px; white-space: pre-wrap; word-break: break-all;
+    }
+    .terminal .t-err { color: #fca5a5; }
+    .terminal .t-info { color: #7dd3fc; }
+    .terminal .t-dim { color: #64748b; }
+    .host-status { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--danger); margin-left: 6px; }
+    .host-status.on { background: var(--success); box-shadow: 0 0 8px var(--success-glow); }
+
     /* In-room Topbar */
     .room-header {
       display: flex;
@@ -274,13 +297,52 @@
         </div>
       </div>
 
-      <div class="form-group">
-        <label class="form-label" for="custom-server">🖥️ آدرس سرور (IP):</label>
+      <label class="form-label">روش اتصال:</label>
+      <div class="conn-selector">
+        <div id="conn-server" class="mode-btn active" onclick="setConnMode('server')">🖥️ سرور</div>
+        <div id="conn-mqtt" class="mode-btn" onclick="setConnMode('mqtt')">☁️ بدون سرور</div>
+        <div id="conn-host" class="mode-btn" onclick="setConnMode('host')">📡 هاست روی گوشی من</div>
+      </div>
+
+      <!-- حالت ۱: اتصال به سرور (کلادفلر / server.js / گوشی هاست) -->
+      <div id="panel-server" class="conn-panel active form-group">
+        <label class="form-label" for="custom-server">آدرس سرور (IP:PORT یا دامنه):</label>
         <div class="server-row">
           <input id="custom-server" class="input-field" dir="ltr" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="192.168.1.5:8080">
           <button type="button" class="btn btn-secondary paste-btn" onclick="pasteServer()">📋 پیست</button>
         </div>
-        <small class="server-hint">اگر آدرس را کپی کرده باشید، خودکار پر می‌شود؛ وگرنه «پیست» بزنید یا دستی بنویسید.</small>
+        <small class="server-hint">آدرسی که دوستِ هاست برایتان فرستاده را اینجا بزنید (اگر کپی کرده باشید خودکار پر می‌شود). اگر workers.dev برایتان باز نمی‌شود، «بدون سرور» را امتحان کنید.</small>
+      </div>
+
+      <!-- حالت ۲: بدون سرور — سیگنالینگ از طریق بروکر عمومی MQTT -->
+      <div id="panel-mqtt" class="conn-panel form-group">
+        <small class="server-hint" style="margin-top:0">
+          هیچ سروری لازم نیست؛ فقط پیام‌های اتصال (نه صدا) از یک بروکر عمومی رد می‌شود و صدا مستقیم بین گوشی‌هاست.
+          همه باید همین حالت و <b>همین نام اتاق</b> را انتخاب کنند — نام اتاق مثل رمز است، یک اسم خاص بگذارید.
+        </small>
+        <details style="margin-top:8px">
+          <summary style="font-size:11px;color:var(--text-muted);cursor:pointer">بروکر دلخواه (اختیاری)</summary>
+          <input id="mqtt-broker" class="input-field" dir="ltr" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="wss://broker.emqx.io:8084/mqtt" style="margin-top:6px;font-size:12px;padding:8px 12px">
+        </details>
+      </div>
+
+      <!-- حالت ۳: اجرای سرور داخل اپ (ترمینال) -->
+      <div id="panel-host" class="conn-panel form-group">
+        <div class="host-box">
+          <div class="host-row">
+            <span style="font-size:12px;font-weight:700">سرور داخلی <span id="host-status" class="host-status"></span></span>
+            <input id="host-port" class="input-field" dir="ltr" inputmode="numeric" value="8080" style="max-width:90px" title="پورت">
+            <button type="button" id="host-toggle-btn" class="btn btn-success btn-icon" onclick="toggleHostServer()">▶ اجرا</button>
+          </div>
+          <div class="host-row" id="host-addr-row" style="display:none">
+            <span class="host-addr" id="host-addr">—</span>
+            <button type="button" class="btn btn-secondary btn-icon" onclick="copyHostAddr()">📋 کپی آدرس</button>
+          </div>
+          <div id="host-terminal" class="terminal"></div>
+          <small class="server-hint" id="host-hint">
+            سرور سیگنالینگ روی همین گوشی اجرا می‌شود. آدرس بالا را برای دوستان بفرستید تا در حالت «سرور» وارد کنند (هم‌شبکه: وای‌فای/هات‌اسپات؛ یا با Port Forward از اینترنت). خودتان با «ورود» مستقیم وصل می‌شوید.
+          </small>
+        </div>
       </div>
 
       <button type="submit" class="btn btn-primary">
@@ -351,7 +413,7 @@
 <div id="audio-container"></div>
 
 <script>
-  let ws = null;
+  let signal = null;      // ترنسپورت سیگنالینگ فعلی: { send(obj), close(), open }
   let myPeerId = null;
   let myUsername = '';
   let localStream = null;
@@ -390,7 +452,123 @@
     } else {
       customServerInput.value = location.host;
     }
+
+    const savedBroker = localStorage.getItem('mqtt_broker');
+    if (savedBroker) document.getElementById('mqtt-broker').value = savedBroker;
+    const savedPort = localStorage.getItem('host_port');
+    if (savedPort) document.getElementById('host-port').value = savedPort;
+
+    // حالت اتصال: ?mode=mqtt|server|host  یا آخرین انتخاب کاربر
+    const modeParam = params.get('mode');
+    if (serverParam) setConnMode('server', true);
+    else if (modeParam && ['server', 'mqtt', 'host'].includes(modeParam)) setConnMode(modeParam, true);
+    else setConnMode(localStorage.getItem('conn_mode') || 'server', true);
+
+    if (!hostServerPlugin()) {
+      termLog('این حالت فقط در اپ اندروید فعال است (سرور داخل اپ اجرا می‌شود).', 'err');
+      termLog('روی کامپیوتر/ترمکس می‌توانید همین کار را با دستور زیر انجام دهید:', 'dim');
+      termLog('  node server.js        (یا  bash termux-server.sh)', 'info');
+      termLog('سپس آدرس چاپ‌شده را به دوستان بدهید و خودتان در حالت «سرور» وارد شوید.', 'dim');
+      document.getElementById('host-toggle-btn').disabled = true;
+      document.getElementById('host-toggle-btn').style.opacity = .5;
+    } else {
+      termLog('آماده. روی «اجرا» بزنید تا سرور سیگنالینگ روی این گوشی بالا بیاید.', 'dim');
+      refreshHostStatus();
+    }
   });
+
+  // ---------- حالت اتصال ----------
+  let connMode = 'server';
+  function setConnMode(mode, silent) {
+    connMode = mode;
+    localStorage.setItem('conn_mode', mode);
+    for (const m of ['server', 'mqtt', 'host']) {
+      document.getElementById('conn-' + m).classList.toggle('active', m === mode);
+      document.getElementById('panel-' + m).classList.toggle('active', m === mode);
+    }
+    if (!silent && mode === 'mqtt') showToast('☁️ حالت بدون سرور: همه باید همین حالت و همین نام اتاق را بزنند.');
+  }
+
+  // ---------- سرور داخل اپ (ترمینال) ----------
+  let hostRunning = false, hostInfo = null, hostListenerAdded = false;
+  function hostServerPlugin() {
+    return isNativeApp() && window.Capacitor.Plugins ? window.Capacitor.Plugins.HostServer : null;
+  }
+  function termLog(text, cls) {
+    const t = document.getElementById('host-terminal');
+    if (!t) return;
+    const line = document.createElement('div');
+    if (cls) line.className = 't-' + cls;
+    const ts = new Date().toTimeString().slice(0, 8);
+    line.textContent = `[${ts}] ${text}`;
+    t.appendChild(line);
+    while (t.children.length > 300) t.removeChild(t.firstChild);
+    t.scrollTop = t.scrollHeight;
+  }
+  function applyHostState(info) {
+    hostRunning = !!(info && info.running);
+    hostInfo = hostRunning ? info : null;
+    document.getElementById('host-status').classList.toggle('on', hostRunning);
+    const btn = document.getElementById('host-toggle-btn');
+    btn.textContent = hostRunning ? '⏹ توقف' : '▶ اجرا';
+    btn.className = 'btn btn-icon ' + (hostRunning ? 'btn-danger' : 'btn-success');
+    document.getElementById('host-port').disabled = hostRunning;
+    const row = document.getElementById('host-addr-row');
+    if (hostRunning) {
+      const ips = (info.addresses || []);
+      document.getElementById('host-addr').textContent = ips.length ? ips.map(ip => `${ip}:${info.port}`).join('  |  ') : `(بدون IP شبکه) :${info.port}`;
+      row.style.display = 'flex';
+    } else {
+      row.style.display = 'none';
+    }
+  }
+  async function refreshHostStatus() {
+    const p = hostServerPlugin();
+    if (!p) return;
+    if (!hostListenerAdded) {
+      hostListenerAdded = true;
+      try { p.addListener('log', (ev) => termLog(ev.text || '', ev.level || '')); } catch (e) {}
+    }
+    try { applyHostState(await p.status()); } catch (e) {}
+  }
+  async function toggleHostServer() {
+    const p = hostServerPlugin();
+    if (!p) return;
+    try {
+      if (hostRunning) {
+        termLog('در حال توقف سرور...', 'dim');
+        applyHostState(await p.stop());
+        termLog('سرور متوقف شد.', 'dim');
+      } else {
+        const port = parseInt(document.getElementById('host-port').value, 10) || 8080;
+        localStorage.setItem('host_port', String(port));
+        termLog(`در حال اجرای سرور روی پورت ${port}...`, 'info');
+        const info = await p.start({ port });
+        applyHostState(info);
+        if (info.running) {
+          termLog(`✅ سرور روشن شد روی پورت ${info.port}`, 'info');
+          (info.addresses || []).forEach(ip => termLog(`  📋 آدرس برای بچه‌ها: ${ip}:${info.port}`, 'info'));
+          if (!(info.addresses || []).length) termLog('  ⚠️ به وای‌فای وصل نیستید یا هات‌اسپات خاموش است؛ IP شبکه پیدا نشد.', 'err');
+          termLog('  بچه‌ها در حالت «سرور» این آدرس را می‌زنند. شما «ورود» را بزنید.', 'dim');
+          copyHostAddr(true);
+        }
+      }
+    } catch (e) {
+      termLog('خطا: ' + (e && e.message ? e.message : e), 'err');
+      applyHostState(await p.status().catch(() => null));
+    }
+  }
+  function copyHostAddr(silent) {
+    if (!hostInfo) return;
+    const ips = hostInfo.addresses || [];
+    if (!ips.length) { if (!silent) showToast('IP شبکه‌ای پیدا نشد.'); return; }
+    const addr = `${ips[0]}:${hostInfo.port}`;
+    const done = () => showToast('📋 آدرس ' + addr + ' کپی شد؛ برای دوستان بفرستید.');
+    const svc = nativeVoiceService();
+    if (svc && svc.writeClipboard) { svc.writeClipboard({ text: addr }).then(done).catch(() => {}); return; }
+    if (navigator.clipboard) navigator.clipboard.writeText(addr).then(done).catch(() => { if (!silent) prompt('آدرس:', addr); });
+    else if (!silent) prompt('آدرس:', addr);
+  }
 
   // --- اپلیکیشن اندروید (Capacitor) ---
   function isNativeApp() {
@@ -405,10 +583,15 @@
     try { await svc.start({ room }); } catch (e) { console.warn('VoiceService:', e); }
   }
   async function leaveRoom() {
+    leaving = true;
+    clearTimeout(reconnectTimer);
+    if (signal) { try { signal.close(); } catch (e) {} signal = null; }
     const svc = nativeVoiceService();
     if (svc) { try { await svc.stop(); } catch (e) {} }
+    // سرور داخلی را روشن نگه می‌داریم تا بقیه قطع نشوند؛ از پنل هاست می‌توان آن را خاموش کرد
     location.reload();
   }
+  window.addEventListener('pagehide', () => { if (signal) { try { signal.close(); } catch (e) {} } });
 
   // --- گرفتن آدرس سرور از کلیپ‌بورد ---
   const SERVER_RE = /(?:wss?:\/\/|https?:\/\/)?(?:\d{1,3}(?:\.\d{1,3}){3}|[a-z0-9-]+(?:\.[a-z0-9-]+)+)(?::\d{2,5})?/i;
@@ -453,7 +636,7 @@
     const r = document.getElementById('room-section');
     return !r || r.style.display === 'none';
   }
-  function tryAutoPaste() { if (inLobby()) autoFillServerFromClipboard(true); }
+  function tryAutoPaste() { if (inLobby() && connMode === 'server') autoFillServerFromClipboard(true); }
   window.addEventListener('load', () => setTimeout(tryAutoPaste, 400));
   window.addEventListener('focus', tryAutoPaste);
   document.addEventListener('visibilitychange', () => { if (!document.hidden) setTimeout(tryAutoPaste, 300); });
@@ -589,40 +772,209 @@
       showToast("میکروفون فعال نشد. فقط صدا را می‌شنوید.");
     }
 
-    // آدرس سرور سیگنالینگ
-    const wsUrl = getWsUrl(room);
-    if (wsUrl.startsWith('ws:') && location.protocol === 'https:' && !isNativeApp()) {
-      showToast('⚠️ مرورگر اجازه اتصال به سرور بدون SSL (ws://) را از سایت https نمی‌دهد؛ از اپ اندروید یا آدرس wss استفاده کنید.');
+    // ---- اتصال سیگنالینگ (سرور / بدون سرور / هاست) ----
+    if (connMode === 'host') {
+      if (!hostServerPlugin()) { showToast('حالت هاست فقط در اپ اندروید؛ از «سرور» یا «بدون سرور» استفاده کنید.'); return; }
+      if (!hostRunning) { await toggleHostServer(); if (!hostRunning) return; }
     }
+    currentRoom = room;
+    joined = false;
+    reconnectAttempt = 0;
+    connectSignaling(room);
+  }
 
-    try {
-      ws = new WebSocket(wsUrl);
-    } catch(err) {
-      alert("خطا در ایجاد اتصال وب‌سوکت به: " + wsUrl);
+  // =====================================================================
+  // لایه‌ی سیگنالینگ: یک رابط مشترک برای WebSocket (سرور) و MQTT (بدون سرور)
+  // =====================================================================
+  let currentRoom = 'public';
+  let joined = false;            // آیا حداقل یک بار init گرفته‌ایم (برای reconnect)
+  let reconnectAttempt = 0;
+  let reconnectTimer = null;
+  let leaving = false;
+  const CONNECT_TIMEOUT = 8000;
+
+  function signalOpen() { return !!(signal && signal.open); }
+  function sendSignal(obj) {
+    if (!signalOpen()) return false;
+    try { signal.send(obj); return true; } catch (e) { console.warn('send failed', e); return false; }
+  }
+
+  function enterRoomUI(room) {
+    document.getElementById('join-section').style.display = 'none';
+    document.getElementById('room-section').style.display = 'block';
+    updatePttUI();
+    const via = connMode === 'mqtt' ? ' (بدون سرور)' : connMode === 'host' ? ' (هاست: این گوشی)' : '';
+    addSystemMsg(`وارد اتاق [${room === 'public' ? 'عمومی' : room}] شدید${via}.`);
+  }
+
+  function connectSignaling(room) {
+    if (signal) { try { signal.close(); } catch (e) {} signal = null; }
+    const handlers = {
+      onOpen: () => {},
+      onMessage: (msg) => handleSignalMessage(msg),
+      onClose: (reason) => onSignalClosed(room, reason),
+    };
+    if (connMode === 'mqtt') {
+      signal = connectMqtt(room, handlers);
+    } else {
+      let wsUrl;
+      if (connMode === 'host') {
+        wsUrl = `ws://127.0.0.1:${hostInfo ? hostInfo.port : 8080}/ws?room=${encodeURIComponent(room)}`;
+      } else {
+        wsUrl = getWsUrl(room);
+        if (wsUrl.startsWith('ws:') && location.protocol === 'https:' && !isNativeApp()) {
+          showToast('⚠️ مرورگر اجازه اتصال به سرور بدون SSL (ws://) را از سایت https نمی‌دهد؛ از اپ اندروید یا آدرس wss استفاده کنید.');
+        }
+      }
+      signal = connectWebSocket(wsUrl, handlers);
+    }
+  }
+
+  function onSignalClosed(room, reason) {
+    if (leaving) return;
+    if (!joined) {
+      // هیچ‌وقت وصل نشدیم → خطا نشان بده و در لابی بمان
+      if (reconnectAttempt === 0) {
+        if (connMode === 'mqtt') showToast('❌ به هیچ بروکری وصل نشد. اینترنت را بررسی کنید یا بروکر دیگری بدهید.');
+        else if (connMode === 'host') showToast('❌ اتصال به سرور داخلی برقرار نشد؛ سرور را دوباره اجرا کنید.');
+        else showToast('❌ سرور جواب نداد (' + (reason || 'timeout') + '). اگر workers.dev فیلتر است، «بدون سرور» را امتحان کنید.');
+      }
       return;
     }
+    // قبلاً داخل اتاق بودیم → اتصال مجدد با backoff
+    for (const id of Object.keys(peers)) removePeer(id, true);
+    reconnectAttempt++;
+    if (reconnectAttempt > 12) { addSystemMsg('اتصال برقرار نشد. برای تلاش دوباره از اتاق خارج و دوباره وارد شوید.'); return; }
+    const delay = Math.min(15000, 1000 * Math.pow(2, reconnectAttempt - 1));
+    addSystemMsg(`اتصال قطع شد؛ تلاش مجدد ${reconnectAttempt} تا ${Math.round(delay / 1000)} ثانیه دیگر...`);
+    clearTimeout(reconnectTimer);
+    reconnectTimer = setTimeout(() => { if (!leaving) connectSignaling(room); }, delay);
+  }
 
-    ws.onopen = () => {
-      document.getElementById('join-section').style.display = 'none';
-      document.getElementById('room-section').style.display = 'block';
-      updatePttUI();
-      addSystemMsg(`وارد اتاق [${room === 'public' ? 'عمومی' : room}] شدید.`);
-    };
+  // ---------- ترنسپورت ۱: WebSocket (سرور کلادفلر / server.js / گوشی هاست) ----------
+  function connectWebSocket(url, h) {
+    const t = { open: false, kind: 'ws', ws: null,
+      send(obj) { this.ws.send(JSON.stringify(obj)); },
+      close() { closedReported = true; this.open = false; clearTimeout(timer); try { this.ws && this.ws.close(); } catch (e) {} } };
+    let timer = null, closedReported = false;
+    const report = (r) => { if (closedReported) return; closedReported = true; t.open = false; clearTimeout(timer); h.onClose(r); };
+    try { t.ws = new WebSocket(url); } catch (e) { setTimeout(() => report('bad-url'), 0); return t; }
+    timer = setTimeout(() => { if (!t.open) { try { t.ws.close(); } catch (e) {} report('timeout'); } }, CONNECT_TIMEOUT);
+    t.ws.onopen = () => { clearTimeout(timer); t.open = true; h.onOpen(); };
+    t.ws.onmessage = (e) => { let m; try { m = JSON.parse(e.data); } catch (err) { return; } h.onMessage(m); };
+    t.ws.onclose = () => report('closed');
+    t.ws.onerror = () => { if (!t.open && !closedReported) { closedReported = true; try { t.ws.close(); } catch (e) {} closedReported = false; report('error'); } };
+    return t;
+  }
 
-    ws.onmessage = async (e) => {
-      let msg;
-      try { msg = JSON.parse(e.data); } catch (err) { return; }
-      handleSignalMessage(msg);
-    };
+  // ---------- ترنسپورت ۲: MQTT 3.1.1 حداقلی روی WebSocket (بروکر عمومی) ----------
+  const DEFAULT_BROKERS = [
+    'wss://broker.emqx.io:8084/mqtt',
+    'wss://broker.hivemq.com:8884/mqtt',
+    'wss://test.mosquitto.org:8081/mqtt',
+  ];
+  function mqttTopicBase(room) {
+    // نام اتاق → تاپیک امن (بدون / + #)
+    const safe = encodeURIComponent(room.toLowerCase()).replace(/[%+#/]/g, '_');
+    return 'tcpvoice/v1/' + safe;
+  }
+  const enc = new TextEncoder(), dec = new TextDecoder();
+  function mqttStr(s) { const b = enc.encode(s); const out = new Uint8Array(2 + b.length); out[0] = b.length >> 8; out[1] = b.length & 255; out.set(b, 2); return out; }
+  function mqttPacket(type, flags, ...parts) {
+    const len = parts.reduce((n, p) => n + p.length, 0);
+    const rl = []; let x = len; do { let d = x % 128; x = Math.floor(x / 128); if (x > 0) d |= 128; rl.push(d); } while (x > 0);
+    const out = new Uint8Array(1 + rl.length + len); out[0] = (type << 4) | flags; out.set(rl, 1);
+    let o = 1 + rl.length; for (const p of parts) { out.set(p, o); o += p.length; }
+    return out;
+  }
+  function connectMqtt(room, h) {
+    const custom = (document.getElementById('mqtt-broker').value || '').trim();
+    if (custom) localStorage.setItem('mqtt_broker', custom); else localStorage.removeItem('mqtt_broker');
+    const brokers = custom ? [custom, ...DEFAULT_BROKERS.filter(b => b !== custom)] : DEFAULT_BROKERS.slice();
+    const base = mqttTopicBase(room);
+    const myId = 'p_' + Math.random().toString(36).slice(2, 9);
+    const topicAll = base + '/all', topicMe = base + '/p/' + myId;
+    const t = { open: false, kind: 'mqtt', ws: null, dead: false,
+      send(obj) {
+        obj.sender = myId;
+        const topic = obj.target ? base + '/p/' + obj.target : topicAll;
+        this.ws.send(mqttPacket(3, 0, mqttStr(topic), enc.encode(JSON.stringify(obj))));
+      },
+      close() {
+        this.dead = true; this.open = false; clearInterval(ping); clearTimeout(timer);
+        try {
+          if (this.ws && this.ws.readyState === 1) {
+            // اعلام خروج + DISCONNECT تمیز
+            this.ws.send(mqttPacket(3, 0, mqttStr(topicAll), enc.encode(JSON.stringify({ type: 'peer-left', sender: myId }))));
+            this.ws.send(mqttPacket(14, 0));
+          }
+          this.ws && this.ws.close();
+        } catch (e) {}
+      } };
+    let ping = null, timer = null, idx = 0, buf = new Uint8Array(0);
 
-    ws.onclose = () => {
-      addSystemMsg("اتصال به سرور قطع شد. در حال تلاش برای اتصال مجدد...");
-    };
-
-    ws.onerror = (err) => {
-      console.error("WebSocket error:", err);
-      showToast("خطا در اتصال به سرور سیگنالینگ! بررسی کنید سرور فعال باشد.");
-    };
+    function tryNext(reason) {
+      if (t.dead) return;
+      clearInterval(ping); clearTimeout(timer); buf = new Uint8Array(0);
+      if (idx >= brokers.length) { t.open = false; h.onClose(reason || 'no-broker'); return; }
+      const url = brokers[idx++];
+      console.log('MQTT: trying', url);
+      let ws;
+      try { ws = new WebSocket(url, 'mqtt'); } catch (e) { return tryNext('bad-url'); }
+      ws.binaryType = 'arraybuffer';
+      t.ws = ws;
+      let connected = false;
+      timer = setTimeout(() => { if (!connected) { try { ws.close(); } catch (e) {} } }, CONNECT_TIMEOUT);
+      ws.onopen = () => {
+        // CONNECT: clientId, clean session, keepalive 30s, Last Will = peer-left
+        const will = JSON.stringify({ type: 'peer-left', sender: myId });
+        const flags = 0x02 | 0x04; // clean session + will flag (QoS0, no retain)
+        ws.send(mqttPacket(1, 0, mqttStr('MQTT'), Uint8Array.of(4, flags, 0, 30),
+          mqttStr('tcpv_' + myId), mqttStr(topicAll), mqttStr(will)));
+      };
+      ws.onmessage = (e) => {
+        const chunk = new Uint8Array(e.data);
+        const nb = new Uint8Array(buf.length + chunk.length); nb.set(buf); nb.set(chunk, buf.length); buf = nb;
+        while (buf.length >= 2) {
+          let mult = 1, len = 0, pos = 1, d;
+          do { if (pos >= buf.length) return; d = buf[pos++]; len += (d & 127) * mult; mult *= 128; } while (d & 128);
+          if (buf.length < pos + len) return;
+          const type = buf[0] >> 4, qos = (buf[0] >> 1) & 3, body = buf.subarray(pos, pos + len);
+          buf = buf.slice(pos + len);
+          if (type === 2) {           // CONNACK
+            if (body[1] !== 0) { console.warn('MQTT CONNACK rc', body[1]); ws.close(); return; }
+            // SUBSCRIBE به تاپیک اتاق و تاپیک شخصی
+            ws.send(mqttPacket(8, 2, Uint8Array.of(0, 1), mqttStr(topicAll), Uint8Array.of(0), mqttStr(topicMe), Uint8Array.of(0)));
+          } else if (type === 9) {    // SUBACK → آماده
+            if (connected) continue;
+            connected = true; clearTimeout(timer); t.open = true;
+            ping = setInterval(() => { try { ws.send(mqttPacket(12, 0)); } catch (e) {} }, 15000);
+            h.onOpen();
+            h.onMessage({ type: 'init', peerId: myId });
+          } else if (type === 3) {    // PUBLISH
+            const tl = (body[0] << 8) | body[1];
+            let off = 2 + tl; if (qos) off += 2;
+            let msg; try { msg = JSON.parse(dec.decode(body.subarray(off))); } catch (err) { continue; }
+            if (!msg || msg.sender === myId) continue;   // پیام خودمان (echo)
+            if (msg.target && msg.target !== myId) continue;
+            h.onMessage(msg);
+          }
+          // PINGRESP (13) و بقیه نادیده
+        }
+      };
+      let ended = false;
+      const ended_ = () => {
+        if (ended) return; ended = true;
+        clearInterval(ping); clearTimeout(timer);
+        if (t.dead) return;
+        if (!connected) tryNext('broker-failed');
+        else { t.open = false; h.onClose('closed'); }
+      };
+      ws.onerror = () => { if (!connected && !ended) { const f = ended_; ended = true; try { ws.close(); } catch (e) {} ended = false; f(); } };
+      ws.onclose = ended_;
+    }
+    tryNext();
+    return t;
   }
 
   async function handleSignalMessage(msg) {
@@ -631,7 +983,10 @@
     switch (msg.type) {
       case 'init':
         myPeerId = msg.peerId;
-        ws.send(JSON.stringify({ type: 'join', name: myUsername, muted: isMicMuted }));
+        if (!joined) { joined = true; enterRoomUI(currentRoom); }
+        else { addSystemMsg('✅ دوباره وصل شدید.'); }
+        reconnectAttempt = 0;
+        sendSignal({ type: 'join', name: myUsername, muted: isMicMuted });
         break;
 
       case 'join':
@@ -639,7 +994,7 @@
         playSound('join');
         updatePeerUI(sender, msg.name, msg.muted);
 
-        ws.send(JSON.stringify({ type: 'welcome', target: sender, name: myUsername, muted: isMicMuted }));
+        sendSignal({ type: 'welcome', target: sender, name: myUsername, muted: isMicMuted });
         initiatePeerOffer(sender, msg.name);
         break;
 
@@ -687,12 +1042,12 @@
     }
 
     pc.onicecandidate = (event) => {
-      if (event.candidate && ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({
+      if (event.candidate && signalOpen()) {
+        sendSignal({
           type: 'ice',
           target: peerId,
           candidate: event.candidate
-        }));
+        });
       }
     };
 
@@ -721,12 +1076,12 @@
     try {
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
-      ws.send(JSON.stringify({
+      sendSignal({
         type: 'offer',
         target: peerId,
         sdp: offer,
         name: myUsername
-      }));
+      });
     } catch (e) {
       console.error("Offer error:", e);
     }
@@ -738,11 +1093,11 @@
       await pc.setRemoteDescription(new RTCSessionDescription(sdp));
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
-      ws.send(JSON.stringify({
+      sendSignal({
         type: 'answer',
         target: peerId,
         sdp: answer
-      }));
+      });
     } catch (e) {
       console.error("Answer error:", e);
     }
@@ -793,8 +1148,8 @@
       playSound('unmute');
     }
 
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: 'mute-status', muted: isMicMuted }));
+    if (signalOpen()) {
+      sendSignal({ type: 'mute-status', muted: isMicMuted });
     }
   }
 
@@ -895,7 +1250,7 @@
     updatePlayerCount();
   }
 
-  function removePeer(peerId) {
+  function removePeer(peerId, silent) {
     if (peers[peerId]) {
       if (peers[peerId].pc) peers[peerId].pc.close();
       delete peers[peerId];
@@ -905,7 +1260,7 @@
     const audio = document.getElementById(`audio-${peerId}`);
     if (audio) audio.remove();
 
-    playSound('leave');
+    if (!silent) playSound('leave');
     updatePlayerCount();
   }
 
@@ -919,7 +1274,10 @@
     const room = rawRoom || 'public';
     const srv = (document.getElementById('custom-server').value || '').trim();
     const base = isNativeApp() ? 'https://javadxpro.github.io/TCP/' : `${location.origin}${location.pathname}`;
-    const link = `${base}?room=${encodeURIComponent(room)}${srv ? '&server=' + encodeURIComponent(srv) : ''}`;
+    let link = `${base}?room=${encodeURIComponent(room)}`;
+    if (connMode === 'mqtt') link += '&mode=mqtt';
+    else if (connMode === 'host' && hostInfo && (hostInfo.addresses || []).length) link += '&server=' + encodeURIComponent(`ws://${hostInfo.addresses[0]}:${hostInfo.port}`);
+    else if (srv) link += '&server=' + encodeURIComponent(srv);
 
     if (navigator.clipboard) {
       navigator.clipboard.writeText(link).then(() => {
@@ -935,8 +1293,8 @@
     const input = document.getElementById('chat-input');
     const text = input.value.trim();
 
-    if (text && ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: 'chat', name: myUsername, text }));
+    if (text && signalOpen()) {
+      sendSignal({ type: 'chat', name: myUsername, text });
       addChatMsg('شما', text);
       input.value = '';
     }
