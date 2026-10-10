@@ -135,6 +135,8 @@
     .terminal .t-info { color: #7dd3fc; }
     .terminal .t-dim { color: #64748b; }
     .host-status { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--danger); margin-left: 6px; }
+    .crown { font-size: 13px; }
+    .conn-selector .mode-btn small { display: block; font-size: 9.5px; opacity: .75; font-weight: normal; margin-top: 2px; }
     .host-status.on { background: var(--success); box-shadow: 0 0 8px var(--success-glow); }
 
     /* In-room Topbar */
@@ -275,7 +277,7 @@
 
     <form onsubmit="handleJoinSubmit(event)">
       <div class="form-group">
-        <label class="form-label">نام شما در بازی (الزامی):</label>
+        <label class="form-label">اسمت تو بازی:</label>
         <input id="username" class="input-field" placeholder="مثلاً: سهراب یا GamerPro" autofocus autocomplete="off" maxlength="25">
       </div>
 
@@ -283,7 +285,7 @@
         <label class="form-label">اتاق گفت‌وگو:</label>
         <input id="room" class="input-field" value="public" placeholder="نام اتاق">
         <small style="color: var(--text-muted); font-size: 11px; margin-top: 4px; display: block;">
-          اتاق «public» اتاق عمومی مشترک برای همه است. برای روم اختصاصی اسمی دلخواه وارد کنید.
+          همه‌ی رفقا باید <b>همین اسم</b> را بزنند. یک اسم خاص بگذارید تا غریبه‌ها وارد نشوند.
         </small>
       </div>
 
@@ -299,26 +301,25 @@
 
       <label class="form-label">روش اتصال:</label>
       <div class="conn-selector">
-        <div id="conn-server" class="mode-btn active" onclick="setConnMode('server')">🖥️ سرور</div>
-        <div id="conn-mqtt" class="mode-btn" onclick="setConnMode('mqtt')">☁️ بدون سرور</div>
-        <div id="conn-host" class="mode-btn" onclick="setConnMode('host')">📡 هاست روی گوشی من</div>
+        <div id="conn-mqtt" class="mode-btn active" onclick="setConnMode('mqtt')">☁️ بدون سرور<br><small>پیشنهادی</small></div>
+        <div id="conn-host" class="mode-btn" onclick="setConnMode('host')">📡 هاست روی گوشی من<br><small>هم‌شبکه</small></div>
+        <div id="conn-server" class="mode-btn" onclick="setConnMode('server')">🖥️ سرور<br><small>پیشرفته</small></div>
       </div>
 
       <!-- حالت ۱: اتصال به سرور (کلادفلر / server.js / گوشی هاست) -->
-      <div id="panel-server" class="conn-panel active form-group">
+      <div id="panel-server" class="conn-panel form-group">
         <label class="form-label" for="custom-server">آدرس سرور (IP:PORT یا دامنه):</label>
         <div class="server-row">
           <input id="custom-server" class="input-field" dir="ltr" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="192.168.1.5:8080">
           <button type="button" class="btn btn-secondary paste-btn" onclick="pasteServer()">📋 پیست</button>
         </div>
-        <small class="server-hint">آدرسی که دوستِ هاست برایتان فرستاده را اینجا بزنید (اگر کپی کرده باشید خودکار پر می‌شود). اگر workers.dev برایتان باز نمی‌شود، «بدون سرور» را امتحان کنید.</small>
+        <small class="server-hint">آدرسی که هاست برایتان فرستاده را اینجا بزنید (اگر کپی کرده باشید خودکار پر می‌شود).</small>
       </div>
 
       <!-- حالت ۲: بدون سرور — سیگنالینگ از طریق بروکر عمومی MQTT -->
-      <div id="panel-mqtt" class="conn-panel form-group">
+      <div id="panel-mqtt" class="conn-panel active form-group">
         <small class="server-hint" style="margin-top:0">
-          هیچ سروری لازم نیست؛ فقط پیام‌های اتصال (نه صدا) از یک بروکر عمومی رد می‌شود و صدا مستقیم بین گوشی‌هاست.
-          همه باید همین حالت و <b>همین نام اتاق</b> را انتخاب کنند — نام اتاق مثل رمز است، یک اسم خاص بگذارید.
+          ✅ هیچ تنظیمی لازم نیست. فقط اسم اتاق را با رفقا یکی کنید و «ورود» بزنید.
         </small>
         <details style="margin-top:8px">
           <summary style="font-size:11px;color:var(--text-muted);cursor:pointer">بروکر دلخواه (اختیاری)</summary>
@@ -399,6 +400,18 @@
       </div>
     </div>
 
+    <!-- بخش مدیریت (فقط برای ادمین: هاست یا اولین نفر اتاق) -->
+    <div id="admin-section" style="display:none">
+      <div class="section-title">
+        <span>👑 مدیریت اتاق <span class="conn-badge">فقط شما می‌بینید</span></span>
+        <span style="display:flex;gap:6px">
+          <button class="btn btn-secondary btn-icon" id="lock-btn" onclick="adminToggleLock()" title="بسته شدن در اتاق به روی تازه‌واردها">🔓 اتاق باز</button>
+          <button class="btn btn-secondary btn-icon" onclick="adminMuteAll()" title="بستن میکروفون همه">🔇 همه ساکت</button>
+        </span>
+      </div>
+      <div id="admin-list" class="peers-container" style="max-height:140px"></div>
+    </div>
+
     <!-- چت متنی گیمینگ -->
     <div class="section-title">💬 چت متنی اتاق</div>
     <div class="chat-box" id="chat-box"></div>
@@ -462,7 +475,11 @@
     const modeParam = params.get('mode');
     if (serverParam) setConnMode('server', true);
     else if (modeParam && ['server', 'mqtt', 'host'].includes(modeParam)) setConnMode(modeParam, true);
-    else setConnMode(localStorage.getItem('conn_mode') || 'server', true);
+    else setConnMode(localStorage.getItem('conn_mode') || 'mqtt', true);
+    const savedName = localStorage.getItem('username');
+    if (savedName) document.getElementById('username').value = savedName;
+    const kicked = localStorage.getItem('kicked_msg');
+    if (kicked) { localStorage.removeItem('kicked_msg'); setTimeout(() => showToast(kicked), 600); }
 
     if (!hostServerPlugin()) {
       termLog('این حالت فقط در اپ اندروید فعال است (سرور داخل اپ اجرا می‌شود).', 'err');
@@ -750,6 +767,7 @@
     }
 
     myUsername = name;
+    localStorage.setItem('username', name);
     document.getElementById('my-name-display').textContent = myUsername;
 
     const rawRoom = document.getElementById('room').value.trim();
@@ -803,7 +821,9 @@
     document.getElementById('join-section').style.display = 'none';
     document.getElementById('room-section').style.display = 'block';
     updatePttUI();
-    const via = connMode === 'mqtt' ? ' (بدون سرور)' : connMode === 'host' ? ' (هاست: این گوشی)' : '';
+    let via = '';
+    if (connMode === 'mqtt') { let b = ''; try { b = new URL(signal && signal.broker || '').hostname; } catch (e) {} via = ' (بدون سرور' + (b ? ' — ' + b : '') + ')'; }
+    else if (connMode === 'host') via = ' (هاست: این گوشی)';
     addSystemMsg(`وارد اتاق [${room === 'public' ? 'عمومی' : room}] شدید${via}.`);
   }
 
@@ -918,6 +938,7 @@
       clearInterval(ping); clearTimeout(timer); buf = new Uint8Array(0);
       if (idx >= brokers.length) { t.open = false; h.onClose(reason || 'no-broker'); return; }
       const url = brokers[idx++];
+      t.broker = url;
       console.log('MQTT: trying', url);
       let ws;
       try { ws = new WebSocket(url, 'mqtt'); } catch (e) { return tryNext('bad-url'); }
@@ -983,23 +1004,53 @@
     switch (msg.type) {
       case 'init':
         myPeerId = msg.peerId;
-        if (!joined) { joined = true; enterRoomUI(currentRoom); }
+        if (!joined) { joined = true; joinedAt = Date.now(); enterRoomUI(currentRoom); }
         else { addSystemMsg('✅ دوباره وصل شدید.'); }
         reconnectAttempt = 0;
-        sendSignal({ type: 'join', name: myUsername, muted: isMicMuted });
+        sendSignal({ type: 'join', name: myUsername, muted: isMicMuted, joinedAt, host: connMode === 'host' });
+        // کمی صبر تا welcome بقیه برسد؛ اگر کسی نبود، خودمان ادمین می‌شویم
+        setTimeout(computeAdmin, 2000);
         break;
 
       case 'join':
         addSystemMsg(`🎮 ${msg.name} وارد بازی شد.`);
         playSound('join');
-        updatePeerUI(sender, msg.name, msg.muted);
+        updatePeerUI(sender, msg.name, msg.muted, msg);
+        computeAdmin();
 
-        sendSignal({ type: 'welcome', target: sender, name: myUsername, muted: isMicMuted });
+        sendSignal({ type: 'welcome', target: sender, name: myUsername, muted: isMicMuted, joinedAt, host: connMode === 'host', locked: roomLocked });
+        if (adminId === myPeerId && roomLocked) {
+          // اتاق قفل است → تازه‌وارد را رد کن
+          sendSignal({ type: 'kick', target: sender, reason: 'locked' });
+          break;
+        }
         initiatePeerOffer(sender, msg.name);
         break;
 
       case 'welcome':
-        updatePeerUI(sender, msg.name, msg.muted);
+        updatePeerUI(sender, msg.name, msg.muted, msg);
+        computeAdmin();
+        if (sender === adminId && typeof msg.locked === 'boolean') setRoomLocked(msg.locked, true);
+        break;
+
+      // ----- دستورات ادمین (فقط از کسی که همه او را ادمین می‌دانند پذیرفته می‌شود) -----
+      case 'admin-mute':
+        if (sender !== adminId || (msg.target && msg.target !== myPeerId)) return;
+        if (!isMicMuted) { setMicMuted(true); showToast('🔇 ادمین میکروفونت رو بست.'); addSystemMsg('ادمین میکروفون شما را بست.'); }
+        break;
+
+      case 'room-lock':
+        if (sender !== adminId) return;
+        setRoomLocked(!!msg.locked, true);
+        break;
+
+      case 'kick':
+        if (sender !== adminId || (msg.target && msg.target !== myPeerId)) return;
+        leaving = true;
+        clearTimeout(reconnectTimer);
+        if (signal) { try { signal.close(); } catch (e) {} signal = null; }
+        localStorage.setItem('kicked_msg', msg.reason === 'locked' ? '🔒 اتاق قفل است؛ از ادمین بخواه بازش کند.' : '⛔ ادمین شما را از اتاق بیرون کرد.');
+        setTimeout(() => location.reload(), 300);
         break;
 
       case 'offer':
@@ -1027,15 +1078,85 @@
 
       case 'peer-left':
         removePeer(sender);
+        computeAdmin();
         break;
     }
+  }
+
+  // =====================================================================
+  // ادمین اتاق: هاست (سرور داخل اپ) یا اولین نفری که وارد شده — بدون سرور و برای همه یکسان محاسبه می‌شود
+  // =====================================================================
+  let joinedAt = 0;
+  let adminId = null;
+  let roomLocked = false;
+
+  function computeAdmin() {
+    if (!myPeerId) return;
+    const cands = [{ id: myPeerId, joinedAt: joinedAt || Infinity, host: connMode === 'host' }];
+    for (const [id, p] of Object.entries(peers)) cands.push({ id, joinedAt: p.joinedAt || Infinity, host: !!p.host });
+    cands.sort((a, b) => (b.host - a.host) || (a.joinedAt - b.joinedAt) || (a.id < b.id ? -1 : 1));
+    const next = cands[0].id;
+    if (next !== adminId) {
+      adminId = next;
+      if (adminId === myPeerId) addSystemMsg('👑 شما ادمین اتاق هستید (بخش «مدیریت» پایین).');
+      else if (peers[adminId]) addSystemMsg(`👑 ${peers[adminId].name} ادمین اتاق است.`);
+    }
+    renderAdminUI();
+  }
+
+  function renderAdminUI() {
+    // تاج روی کارت ادمین
+    document.querySelectorAll('.crown').forEach(el => el.remove());
+    const adminCard = document.getElementById(adminId === myPeerId ? 'my-card' : `peer-${adminId}`);
+    if (adminCard) {
+      const c = document.createElement('span'); c.className = 'crown'; c.textContent = '👑'; c.title = 'ادمین اتاق';
+      adminCard.querySelector('.peer-info').prepend(c);
+    }
+    const sec = document.getElementById('admin-section');
+    const isAdmin = adminId === myPeerId;
+    sec.style.display = isAdmin ? 'block' : 'none';
+    if (!isAdmin) return;
+    const list = document.getElementById('admin-list');
+    list.textContent = '';
+    const ids = Object.keys(peers);
+    if (!ids.length) {
+      const d = document.createElement('div'); d.className = 'msg system'; d.style.padding = '6px'; d.textContent = 'هنوز کسی نیامده. لینک اتاق را بفرست.'; list.appendChild(d);
+    }
+    for (const id of ids) {
+      const p = peers[id];
+      const row = document.createElement('div'); row.className = 'peer-card';
+      const info = document.createElement('div'); info.className = 'peer-info'; info.textContent = (p.muted ? '🔇 ' : '🎙️ ') + (p.name || 'بازیکن');
+      const acts = document.createElement('div'); acts.style.display = 'flex'; acts.style.gap = '6px';
+      const mute = document.createElement('button'); mute.className = 'btn btn-secondary btn-icon'; mute.textContent = '🔇 ساکت'; mute.title = 'بستن میکروفون این نفر';
+      mute.onclick = () => { sendSignal({ type: 'admin-mute', target: id }); showToast(`میکروفون ${p.name} بسته شد.`); };
+      const kick = document.createElement('button'); kick.className = 'btn btn-danger btn-icon'; kick.textContent = '⛔ اخراج';
+      kick.onclick = () => { if (confirm(`${p.name} از اتاق بیرون شود؟`)) sendSignal({ type: 'kick', target: id }); };
+      acts.appendChild(mute); acts.appendChild(kick);
+      row.appendChild(info); row.appendChild(acts); list.appendChild(row);
+    }
+    document.getElementById('lock-btn').textContent = roomLocked ? '🔒 اتاق قفل' : '🔓 اتاق باز';
+    document.getElementById('lock-btn').className = 'btn btn-icon ' + (roomLocked ? 'btn-danger' : 'btn-secondary');
+  }
+
+  function setRoomLocked(locked, fromRemote) {
+    if (roomLocked === locked) return;
+    roomLocked = locked;
+    addSystemMsg(locked ? '🔒 ادمین در اتاق را بست؛ کسی دیگر نمی‌تواند وارد شود.' : '🔓 اتاق دوباره باز شد.');
+    if (!fromRemote) sendSignal({ type: 'room-lock', locked });
+    renderAdminUI();
+  }
+  function adminToggleLock() { if (adminId === myPeerId) setRoomLocked(!roomLocked, false); }
+  function adminMuteAll() {
+    if (adminId !== myPeerId) return;
+    sendSignal({ type: 'admin-mute' });   // بدون target → همه
+    showToast('میکروفون همه بسته شد.');
   }
 
   function getOrCreatePeerConnection(peerId, peerName) {
     if (peers[peerId]?.pc) return peers[peerId].pc;
 
     const pc = new RTCPeerConnection(rtcConfig);
-    peers[peerId] = { pc, name: peerName, volume: 1, audioEl: null };
+    peers[peerId] = Object.assign(peers[peerId] || { volume: 1, audioEl: null }, { pc, name: peerName || (peers[peerId] && peers[peerId].name) });
 
     if (localStream) {
       localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
@@ -1181,6 +1302,7 @@
     const icon = document.getElementById(`peer-mic-${peerId}`);
     if (icon) icon.innerText = muted ? '🔇' : '🎙️';
     if (peers[peerId]) peers[peerId].muted = muted;
+    if (adminId === myPeerId) renderAdminUI();
   }
 
   function setupAudioMeter(elementId, stream) {
@@ -1215,7 +1337,11 @@
     } catch (e) {}
   }
 
-  function updatePeerUI(peerId, peerName, muted) {
+  function updatePeerUI(peerId, peerName, muted, meta) {
+    peers[peerId] = peers[peerId] || { pc: null, volume: 1, audioEl: null };
+    peers[peerId].name = peerName;
+    peers[peerId].muted = !!muted;
+    if (meta) { peers[peerId].joinedAt = +meta.joinedAt || 0; peers[peerId].host = !!meta.host; }
     if (document.getElementById(`peer-${peerId}`)) return;
 
     const container = document.getElementById('peers-container');
@@ -1262,6 +1388,7 @@
 
     if (!silent) playSound('leave');
     updatePlayerCount();
+    if (adminId === myPeerId) renderAdminUI();
   }
 
   function updatePlayerCount() {
