@@ -2,7 +2,7 @@
 import { mkdirSync, copyFileSync, rmSync, existsSync } from 'node:fs';
 rmSync('www', { recursive: true, force: true });
 mkdirSync('www');
-for (const f of ['index.html', 'manifest.json', 'icon.svg']) {
+for (const f of ['index.html', 'signal.js', 'manifest.json', 'icon.svg']) {
   if (existsSync(f)) copyFileSync(f, `www/${f}`);
 }
 console.log('www ready');

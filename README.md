@@ -101,7 +101,8 @@ npm run deploy
 
 پروژه با **Capacitor 7** به اپ اندروید تبدیل شده و یک **Foreground Service** (نوع `microphone`) دارد تا وقتی به بازی می‌روید میکروفون و اتصال WebRTC قطع نشود (نوتیفیکیشن «چت صوتی فعال است» نمایش داده می‌شود؛ WakeLock و WifiLock هم گرفته می‌شود).
 
-- **دریافت APK:** در تب **Actions** گیت‌هاب، ورک‌فلو `Android APK` را باز کنید و آرتیفکت `TCP-Voice-apk` را دانلود کنید. با push یک تگ `v*` (مثلاً `v1.0.0`) فایل APK در بخش Releases هم منتشر می‌شود.
+- **دریافت APK (لینک ثابت):** https://github.com/javadxpro/TCP/releases/latest/download/TCP-Voice.apk — روی سایت هم دکمه‌ی «نصب اپ اندروید» روی گوشی‌های اندروید نمایش داده می‌شود.
+- **بیلد هر commit:** در تب **Actions** گیت‌هاب، ورک‌فلو `Android APK` را باز کنید و آرتیفکت `TCP-Voice-apk` را دانلود کنید. با push یک تگ `v*` (مثلاً `v1.0.0`) فایل APK در بخش Releases هم منتشر می‌شود.
 - **بیلد محلی:** `npm ci && npm run cap:sync && cd android && ./gradlew assembleDebug` (نیازمند JDK 21 و Android SDK).
 - سرور پیش‌فرض داخل اپ `tcp.javadxpro.workers.dev` است و از دکمه تنظیمات سرور قابل تغییر است. برای سرور محلی بدون SSL آدرس را با `ws://IP:PORT` وارد کنید.
 - پیشنهاد: در تنظیمات گوشی، بهینه‌سازی باتری را برای اپ «TCP Voice» خاموش کنید.
@@ -124,3 +125,24 @@ bash termux-server.sh        # یا: node server.js  (پورت پیش‌فرض 8
 - همه باید در **یک شبکه** باشند (هات‌اسپات گوشی میزبان یا یک وای‌فای). برای اینترنت عمومی از تونل (مثلاً `cloudflared tunnel --url http://localhost:8080`) استفاده کنید و آدرس `…trycloudflare.com` را بدهید.
 - وضعیت سرور: `http://IP:8080/health`
 - اگر پورت 8080 اشغال باشد، سرور خودش پورت بعدی (8081، …) را امتحان می‌کند و آدرس درست را نشان می‌دهد. اگر نسخه قبلی سرور هنوز روشن باشد، همین را اعلام می‌کند؛ برای بستنش: `pkill -f "node server.js"`
+
+---
+
+## 🧩 استفاده از لایه‌ی سیگنالینگ در پروژه‌های دیگر (`signal.js`)
+
+لایه‌ی «بدون سرور» به‌صورت یک فایل مستقل و بدون وابستگی در `signal.js` است و می‌شود با آن هر چیز P2P دیگری ساخت: اشتراک صفحه، ارسال فایل، چت متنی، سینک بازی و… (نمونه‌ی کامل: [`examples/share.html`](examples/share.html) — اشتراک صفحه + ارسال فایل بدون سرور).
+
+```html
+<script src="signal.js"></script>
+<script>
+  const room = TCPSignal.createRoom('اسم-اتاق', { mode: 'mqtt' });   // یا { mode: 'ws', url: 'ws://192.168.1.5:8080' }
+  room.on('ready',       ({ id }) => console.log('من:', id));
+  room.on('peer-joined', ({ id, meta, initiator }) => { /* initiator=true یعنی شما باید offer بدهید */ });
+  room.on('peer-left',   ({ id }) => {});
+  room.on('message',     ({ from, data }) => {});   // هر JSON دلخواه (SDP/ICE/…)
+  room.send({ hello: 1 });            // به همه
+  room.send({ sdp }, peerId);         // فقط به یک نفر
+</script>
+```
+
+محدودیت‌ها: برای جمع‌های کوچک (mesh تا ~۸ نفر) عالی است؛ برای پخش به صدها نفر SFU/CDN لازم است. روی NAT سخت‌گیر (CGNAT سیم‌کارت) ممکن است به TURN نیاز شود.
