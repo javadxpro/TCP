@@ -1,16 +1,17 @@
-// تزریق index.html به داخل index.js (ورکر کلادفلر) تا نسخه‌ی ورکر همیشه با فرانت‌اند یکی باشد
+// تزریق index.html و signal.js به داخل index.js (ورکر کلادفلر) تا نسخه‌ی ورکر همیشه با فرانت‌اند یکی باشد
 // اجرا: node scripts/sync-worker.mjs      (به‌صورت خودکار قبل از deploy و در test اجرا می‌شود)
 import { readFileSync, writeFileSync } from 'node:fs';
 const html = readFileSync('index.html', 'utf8');
-const src = readFileSync('index.js', 'utf8');
-const STR = String.raw`"(?:[^"\
-]|\.)*"`;   // یک رشته‌ی JSON تک‌خطی
-const re = new RegExp('const htmlContent = ' + STR + ';');
-if (!re.test(src)) { console.error('htmlContent در index.js پیدا نشد'); process.exit(1); }
 const sig = readFileSync('signal.js', 'utf8');
-const re2 = new RegExp('const signalJs = ' + STR + ';');
-if (!re2.test(src)) { console.error('signalJs در index.js پیدا نشد'); process.exit(1); }
-const next = src.replace(re, () => 'const htmlContent = ' + JSON.stringify(html) + ';')
-                .replace(re2, () => 'const signalJs = ' + JSON.stringify(sig) + ';');
-if (next !== src) { writeFileSync('index.js', next); console.log('index.js با index.html و signal.js همگام شد'); }
+let src = readFileSync('index.js', 'utf8');
+// یک رشته‌ی JSON تک‌خطی: "..." بدون newline، با escape‌ها
+const STR = '"(?:[^"\\\\\\n]|\\\\.)*"';
+const inject = (name, value) => {
+  const re = new RegExp('const ' + name + ' = ' + STR + ';');
+  if (!re.test(src)) { console.error(name + ' در index.js پیدا نشد'); process.exit(1); }
+  src = src.replace(re, () => 'const ' + name + ' = ' + JSON.stringify(value) + ';');
+};
+inject('htmlContent', html);
+inject('signalJs', sig);
+if (src !== readFileSync('index.js', 'utf8')) { writeFileSync('index.js', src); console.log('index.js با index.html و signal.js همگام شد'); }
 else console.log('index.js از قبل همگام است');
