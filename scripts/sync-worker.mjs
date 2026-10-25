@@ -3,10 +3,12 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 const html = readFileSync('index.html', 'utf8');
 const src = readFileSync('index.js', 'utf8');
-const re = /const htmlContent = ".*";/s;
+const STR = String.raw`"(?:[^"\
+]|\.)*"`;   // یک رشته‌ی JSON تک‌خطی
+const re = new RegExp('const htmlContent = ' + STR + ';');
 if (!re.test(src)) { console.error('htmlContent در index.js پیدا نشد'); process.exit(1); }
 const sig = readFileSync('signal.js', 'utf8');
-const re2 = /const signalJs = ".*";/s;
+const re2 = new RegExp('const signalJs = ' + STR + ';');
 if (!re2.test(src)) { console.error('signalJs در index.js پیدا نشد'); process.exit(1); }
 const next = src.replace(re, () => 'const htmlContent = ' + JSON.stringify(html) + ';')
                 .replace(re2, () => 'const signalJs = ' + JSON.stringify(sig) + ';');
