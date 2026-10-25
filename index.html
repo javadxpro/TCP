@@ -350,6 +350,11 @@
         🚀 ورود به روم و فعال‌سازی صدا
       </button>
 
+      <a id="apk-link" class="btn btn-secondary" href="https://github.com/javadxpro/TCP/releases/latest/download/TCP-Voice.apk"
+         style="display:none;width:100%;margin-top:10px;text-decoration:none" download>
+        🤖 نصب اپ اندروید (میکروفون در پس‌زمینه + حالت هاست)
+      </a>
+
     </form>
   </div>
 
@@ -425,6 +430,7 @@
 
 <div id="audio-container"></div>
 
+<script src="signal.js"></script>
 <script>
   let signal = null;      // ترنسپورت سیگنالینگ فعلی: { send(obj), close(), open }
   let myPeerId = null;
@@ -480,6 +486,9 @@
     if (savedName) document.getElementById('username').value = savedName;
     const kicked = localStorage.getItem('kicked_msg');
     if (kicked) { localStorage.removeItem('kicked_msg'); setTimeout(() => showToast(kicked), 600); }
+
+    // دکمه‌ی دانلود APK فقط روی اندرویدِ مرورگر (نه داخل خود اپ)
+    if (!isNativeApp() && /android/i.test(navigator.userAgent)) document.getElementById('apk-link').style.display = 'inline-flex';
 
     if (!hostServerPlugin()) {
       termLog('این حالت فقط در اپ اندروید فعال است (سرور داخل اپ اجرا می‌شود).', 'err');
@@ -809,7 +818,7 @@
   let reconnectAttempt = 0;
   let reconnectTimer = null;
   let leaving = false;
-  const CONNECT_TIMEOUT = 8000;
+  const CONNECT_TIMEOUT = 8000; // (در signal.js هم همین مقدار است)
 
   function signalOpen() { return !!(signal && signal.open); }
   function sendSignal(obj) {
@@ -871,131 +880,14 @@
     reconnectTimer = setTimeout(() => { if (!leaving) connectSignaling(room); }, delay);
   }
 
-  // ---------- ترنسپورت ۱: WebSocket (سرور کلادفلر / server.js / گوشی هاست) ----------
-  function connectWebSocket(url, h) {
-    const t = { open: false, kind: 'ws', ws: null,
-      send(obj) { this.ws.send(JSON.stringify(obj)); },
-      close() { closedReported = true; this.open = false; clearTimeout(timer); try { this.ws && this.ws.close(); } catch (e) {} } };
-    let timer = null, closedReported = false;
-    const report = (r) => { if (closedReported) return; closedReported = true; t.open = false; clearTimeout(timer); h.onClose(r); };
-    try { t.ws = new WebSocket(url); } catch (e) { setTimeout(() => report('bad-url'), 0); return t; }
-    timer = setTimeout(() => { if (!t.open) { try { t.ws.close(); } catch (e) {} report('timeout'); } }, CONNECT_TIMEOUT);
-    t.ws.onopen = () => { clearTimeout(timer); t.open = true; h.onOpen(); };
-    t.ws.onmessage = (e) => { let m; try { m = JSON.parse(e.data); } catch (err) { return; } h.onMessage(m); };
-    t.ws.onclose = () => report('closed');
-    t.ws.onerror = () => { if (!t.open && !closedReported) { closedReported = true; try { t.ws.close(); } catch (e) {} closedReported = false; report('error'); } };
-    return t;
-  }
-
-  // ---------- ترنسپورت ۲: MQTT 3.1.1 حداقلی روی WebSocket (بروکر عمومی) ----------
-  const DEFAULT_BROKERS = [
-    'wss://broker.emqx.io:8084/mqtt',
-    'wss://broker.hivemq.com:8884/mqtt',
-    'wss://test.mosquitto.org:8081/mqtt',
-  ];
-  function mqttTopicBase(room) {
-    // نام اتاق → تاپیک امن (بدون / + #)
-    const safe = encodeURIComponent(room.toLowerCase()).replace(/[%+#/]/g, '_');
-    return 'tcpvoice/v1/' + safe;
-  }
-  const enc = new TextEncoder(), dec = new TextDecoder();
-  function mqttStr(s) { const b = enc.encode(s); const out = new Uint8Array(2 + b.length); out[0] = b.length >> 8; out[1] = b.length & 255; out.set(b, 2); return out; }
-  function mqttPacket(type, flags, ...parts) {
-    const len = parts.reduce((n, p) => n + p.length, 0);
-    const rl = []; let x = len; do { let d = x % 128; x = Math.floor(x / 128); if (x > 0) d |= 128; rl.push(d); } while (x > 0);
-    const out = new Uint8Array(1 + rl.length + len); out[0] = (type << 4) | flags; out.set(rl, 1);
-    let o = 1 + rl.length; for (const p of parts) { out.set(p, o); o += p.length; }
-    return out;
-  }
+  // ---------- ترنسپورت‌ها در signal.js (قابل استفاده در پروژه‌های دیگر) ----------
+  const DEFAULT_BROKERS = TCPSignal.DEFAULT_BROKERS;
+  function connectWebSocket(url, h) { return TCPSignal.connectWebSocket(url, h); }
   function connectMqtt(room, h) {
     const custom = (document.getElementById('mqtt-broker').value || '').trim();
     if (custom) localStorage.setItem('mqtt_broker', custom); else localStorage.removeItem('mqtt_broker');
     const brokers = custom ? [custom, ...DEFAULT_BROKERS.filter(b => b !== custom)] : DEFAULT_BROKERS.slice();
-    const base = mqttTopicBase(room);
-    const myId = 'p_' + Math.random().toString(36).slice(2, 9);
-    const topicAll = base + '/all', topicMe = base + '/p/' + myId;
-    const t = { open: false, kind: 'mqtt', ws: null, dead: false,
-      send(obj) {
-        obj.sender = myId;
-        const topic = obj.target ? base + '/p/' + obj.target : topicAll;
-        this.ws.send(mqttPacket(3, 0, mqttStr(topic), enc.encode(JSON.stringify(obj))));
-      },
-      close() {
-        this.dead = true; this.open = false; clearInterval(ping); clearTimeout(timer);
-        try {
-          if (this.ws && this.ws.readyState === 1) {
-            // اعلام خروج + DISCONNECT تمیز
-            this.ws.send(mqttPacket(3, 0, mqttStr(topicAll), enc.encode(JSON.stringify({ type: 'peer-left', sender: myId }))));
-            this.ws.send(mqttPacket(14, 0));
-          }
-          this.ws && this.ws.close();
-        } catch (e) {}
-      } };
-    let ping = null, timer = null, idx = 0, buf = new Uint8Array(0);
-
-    function tryNext(reason) {
-      if (t.dead) return;
-      clearInterval(ping); clearTimeout(timer); buf = new Uint8Array(0);
-      if (idx >= brokers.length) { t.open = false; h.onClose(reason || 'no-broker'); return; }
-      const url = brokers[idx++];
-      t.broker = url;
-      console.log('MQTT: trying', url);
-      let ws;
-      try { ws = new WebSocket(url, 'mqtt'); } catch (e) { return tryNext('bad-url'); }
-      ws.binaryType = 'arraybuffer';
-      t.ws = ws;
-      let connected = false;
-      timer = setTimeout(() => { if (!connected) { try { ws.close(); } catch (e) {} } }, CONNECT_TIMEOUT);
-      ws.onopen = () => {
-        // CONNECT: clientId, clean session, keepalive 30s, Last Will = peer-left
-        const will = JSON.stringify({ type: 'peer-left', sender: myId });
-        const flags = 0x02 | 0x04; // clean session + will flag (QoS0, no retain)
-        ws.send(mqttPacket(1, 0, mqttStr('MQTT'), Uint8Array.of(4, flags, 0, 30),
-          mqttStr('tcpv_' + myId), mqttStr(topicAll), mqttStr(will)));
-      };
-      ws.onmessage = (e) => {
-        const chunk = new Uint8Array(e.data);
-        const nb = new Uint8Array(buf.length + chunk.length); nb.set(buf); nb.set(chunk, buf.length); buf = nb;
-        while (buf.length >= 2) {
-          let mult = 1, len = 0, pos = 1, d;
-          do { if (pos >= buf.length) return; d = buf[pos++]; len += (d & 127) * mult; mult *= 128; } while (d & 128);
-          if (buf.length < pos + len) return;
-          const type = buf[0] >> 4, qos = (buf[0] >> 1) & 3, body = buf.subarray(pos, pos + len);
-          buf = buf.slice(pos + len);
-          if (type === 2) {           // CONNACK
-            if (body[1] !== 0) { console.warn('MQTT CONNACK rc', body[1]); ws.close(); return; }
-            // SUBSCRIBE به تاپیک اتاق و تاپیک شخصی
-            ws.send(mqttPacket(8, 2, Uint8Array.of(0, 1), mqttStr(topicAll), Uint8Array.of(0), mqttStr(topicMe), Uint8Array.of(0)));
-          } else if (type === 9) {    // SUBACK → آماده
-            if (connected) continue;
-            connected = true; clearTimeout(timer); t.open = true;
-            ping = setInterval(() => { try { ws.send(mqttPacket(12, 0)); } catch (e) {} }, 15000);
-            h.onOpen();
-            h.onMessage({ type: 'init', peerId: myId });
-          } else if (type === 3) {    // PUBLISH
-            const tl = (body[0] << 8) | body[1];
-            let off = 2 + tl; if (qos) off += 2;
-            let msg; try { msg = JSON.parse(dec.decode(body.subarray(off))); } catch (err) { continue; }
-            if (!msg || msg.sender === myId) continue;   // پیام خودمان (echo)
-            if (msg.target && msg.target !== myId) continue;
-            h.onMessage(msg);
-          }
-          // PINGRESP (13) و بقیه نادیده
-        }
-      };
-      let ended = false;
-      const ended_ = () => {
-        if (ended) return; ended = true;
-        clearInterval(ping); clearTimeout(timer);
-        if (t.dead) return;
-        if (!connected) tryNext('broker-failed');
-        else { t.open = false; h.onClose('closed'); }
-      };
-      ws.onerror = () => { if (!connected && !ended) { const f = ended_; ended = true; try { ws.close(); } catch (e) {} ended = false; f(); } };
-      ws.onclose = ended_;
-    }
-    tryNext();
-    return t;
+    return TCPSignal.connectMqtt(room, h, { brokers, prefix: 'tcpvoice/v1' });
   }
 
   async function handleSignalMessage(msg) {

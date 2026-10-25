@@ -275,6 +275,7 @@ public class LanSignalServer {
         }
         String file; String type;
         if ("/".equals(path) || "/index.html".equals(path)) { file = "public/index.html"; type = "text/html; charset=utf-8"; }
+        else if ("/signal.js".equals(path)) { file = "public/signal.js"; type = "application/javascript; charset=utf-8"; }
         else if ("/manifest.json".equals(path)) { file = "public/manifest.json"; type = "application/json; charset=utf-8"; }
         else if ("/icon.svg".equals(path)) { file = "public/icon.svg"; type = "image/svg+xml; charset=utf-8"; }
         else { writeHttp(out, 404, "text/plain", "Not found".getBytes(StandardCharsets.UTF_8)); return; }

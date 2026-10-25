@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>اشتراک صفحه و ارسال فایل بدون سرور — نمونه‌ی TCPSignal</title>
+<style>
+  body{font-family:system-ui,sans-serif;background:#090d16;color:#f8fafc;margin:0;padding:16px;display:flex;justify-content:center}
+  .card{width:100%;max-width:720px;background:#111827;border:1px solid #334155;border-radius:16px;padding:20px}
+  h1{font-size:18px;color:#38bdf8;margin:0 0 6px}
+  p.muted{color:#94a3b8;font-size:12px;margin:0 0 14px}
+  input,button{font:inherit;border-radius:10px;border:1px solid #334155;padding:10px 12px}
+  input{background:#0b1120;color:#fff;width:100%;box-sizing:border-box}
+  button{background:#1e293b;color:#fff;cursor:pointer}
+  button.primary{background:linear-gradient(135deg,#0284c7,#2563eb);border:0}
+  .row{display:flex;gap:8px;margin-bottom:10px;align-items:center;flex-wrap:wrap}
+  video{width:100%;background:#000;border-radius:12px;margin-top:10px;display:none}
+  #log{background:#020617;border:1px solid #1e293b;border-radius:8px;padding:8px;height:140px;overflow:auto;font-size:12px;direction:ltr;text-align:left;font-family:monospace;color:#86efac;margin-top:10px}
+  .peer{display:inline-block;background:#0b1120;border:1px solid #334155;border-radius:20px;padding:4px 10px;font-size:12px;margin:2px}
+  progress{width:100%}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>🖥️ اشتراک صفحه + 📁 ارسال فایل — بدون سرور</h1>
+  <p class="muted">نمونه‌ای از استفاده از <code>signal.js</code> خارج از چت صوتی. سیگنالینگ از بروکر عمومی MQTT، خودِ ویدیو/فایل مستقیم P2P.</p>
+
+  <div class="row">
+    <input id="room" placeholder="اسم اتاق (مثل رمز؛ یکسان برای همه)" value="">
+    <button class="primary" id="join">ورود</button>
+  </div>
+  <div id="peers" class="row"></div>
+
+  <div class="row" id="actions" style="display:none">
+    <button id="share">🖥️ اشتراک صفحه‌ی من</button>
+    <button id="stop" style="display:none">⏹ توقف اشتراک</button>
+    <label><button type="button" onclick="document.getElementById('file').click()">📁 ارسال فایل به همه</button><input id="file" type="file" style="display:none"></label>
+  </div>
+  <progress id="prog" value="0" max="1" style="display:none"></progress>
+  <video id="remote" autoplay playsinline controls></video>
+  <div id="log"></div>
+</div>
+
+<script src="../signal.js"></script>
+<script>
+  const $ = id => document.getElementById(id);
+  const log = (t) => { const d = document.createElement('div'); d.textContent = new Date().toTimeString().slice(0,8) + ' ' + t; $('log').appendChild(d); $('log').scrollTop = 1e9; };
+  const rtc = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun.cloudflare.com:3478' }] };
+  const pcs = {};          // peerId -> RTCPeerConnection
+  const chans = {};        // peerId -> RTCDataChannel (برای فایل)
+  let room = null, screenStream = null;
+
+  $('room').value = new URLSearchParams(location.search).get('room') || '';
+
+  $('join').onclick = () => {
+    const name = $('room').value.trim(); if (!name) return alert('اسم اتاق را بنویس');
+    history.replaceState(null, '', '?room=' + encodeURIComponent(name));
+    room = TCPSignal.createRoom(name, { mode: 'mqtt', meta: { ua: navigator.userAgent.slice(0, 20) } });
+    room.on('ready', ({ id }) => { log('✅ وصل شدم: ' + id + ' via ' + room.transport.broker); $('actions').style.display = 'flex'; $('join').disabled = true; });
+    room.on('peer-joined', ({ id, initiator }) => { log('+ ' + id); renderPeers(); getPc(id, initiator); });
+    room.on('peer-left', ({ id }) => { log('- ' + id); if (pcs[id]) pcs[id].close(); delete pcs[id]; delete chans[id]; renderPeers(); });
+    room.on('message', ({ from, data }) => onSignal(from, data));
+    room.on('close', ({ reason }) => log('✖ قطع شد: ' + reason));
+  };
+  function renderPeers() { $('peers').innerHTML = [...room.peers.keys()].map(id => `<span class="peer">👤 ${id}</span>`).join('') || '<span class="peer">منتظر بقیه…</span>'; }
+
+  // ---------- WebRTC: یک اتصال برای هر نفر؛ قدیمی‌تر (initiator) offer می‌دهد ----------
+  function getPc(id, initiator) {
+    if (pcs[id]) return pcs[id];
+    const pc = new RTCPeerConnection(rtc); pcs[id] = pc;
+    pc.onicecandidate = e => e.candidate && room.send({ ice: e.candidate }, id);
+    pc.ontrack = e => { $('remote').srcObject = e.streams[0]; $('remote').style.display = 'block'; log('📺 دریافت تصویر از ' + id); };
+    pc.onnegotiationneeded = async () => { try { await pc.setLocalDescription(await pc.createOffer()); room.send({ sdp: pc.localDescription }, id); } catch (e) { log('offer: ' + e.message); } };
+    pc.ondatachannel = e => setupChannel(id, e.channel);
+    if (initiator) setupChannel(id, pc.createDataChannel('file'));
+    if (screenStream) screenStream.getTracks().forEach(t => pc.addTrack(t, screenStream));
+    return pc;
+  }
+  async function onSignal(from, data) {
+    const pc = getPc(from, false);
+    if (data.sdp) {
+      if (data.sdp.type === 'offer' && pc.signalingState !== 'stable') { await pc.setLocalDescription({ type: 'rollback' }).catch(() => {}); }
+      await pc.setRemoteDescription(data.sdp);
+      if (data.sdp.type === 'offer') { await pc.setLocalDescription(await pc.createAnswer()); room.send({ sdp: pc.localDescription }, from); }
+    } else if (data.ice) { try { await pc.addIceCandidate(data.ice); } catch (e) {} }
+  }
+
+  // ---------- اشتراک صفحه ----------
+  $('share').onclick = async () => {
+    try { screenStream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 30 }, audio: true }); }
+    catch (e) { return log('اشتراک صفحه لغو شد'); }
+    for (const pc of Object.values(pcs)) screenStream.getTracks().forEach(t => pc.addTrack(t, screenStream));
+    screenStream.getVideoTracks()[0].onended = stopShare;
+    $('share').style.display = 'none'; $('stop').style.display = ''; log('🖥️ اشتراک صفحه شروع شد');
+  };
+  function stopShare() {
+    if (!screenStream) return;
+    screenStream.getTracks().forEach(t => t.stop());
+    for (const pc of Object.values(pcs)) pc.getSenders().forEach(s => s.track && pc.removeTrack(s));
+    screenStream = null; $('share').style.display = ''; $('stop').style.display = 'none'; log('⏹ اشتراک متوقف شد');
+  }
+  $('stop').onclick = stopShare;
+
+  // ---------- ارسال فایل روی DataChannel (قطعه‌های ۶۴KB با کنترل بافر) ----------
+  const CHUNK = 64 * 1024;
+  function setupChannel(id, ch) {
+    ch.binaryType = 'arraybuffer'; chans[id] = ch;
+    let meta = null, parts = [], got = 0;
+    ch.onmessage = e => {
+      if (typeof e.data === 'string') { meta = JSON.parse(e.data); parts = []; got = 0; log(`📥 دریافت ${meta.name} (${(meta.size/1e6).toFixed(1)}MB) از ${id}`); $('prog').style.display = ''; return; }
+      parts.push(e.data); got += e.data.byteLength; $('prog').value = got / meta.size;
+      if (got >= meta.size) {
+        const url = URL.createObjectURL(new Blob(parts, { type: meta.type }));
+        const a = Object.assign(document.createElement('a'), { href: url, download: meta.name, textContent: '⬇️ ذخیره ' + meta.name });
+        $('log').appendChild(a); $('prog').style.display = 'none'; log('✅ فایل کامل شد');
+      }
+    };
+  }
+  $('file').onchange = async () => {
+    const f = $('file').files[0]; if (!f) return;
+    const open = Object.entries(chans).filter(([, c]) => c.readyState === 'open');
+    if (!open.length) return log('هنوز کسی وصل نیست');
+    log(`📤 ارسال ${f.name} به ${open.length} نفر`); $('prog').style.display = '';
+    for (const [, ch] of open) ch.send(JSON.stringify({ name: f.name, size: f.size, type: f.type }));
+    for (let off = 0; off < f.size; off += CHUNK) {
+      const buf = await f.slice(off, off + CHUNK).arrayBuffer();
+      for (const [, ch] of open) {
+        while (ch.bufferedAmount > 8 * CHUNK) await new Promise(r => setTimeout(r, 20));
+        ch.send(buf);
+      }
+      $('prog').value = Math.min(1, (off + CHUNK) / f.size);
+    }
+    $('prog').style.display = 'none'; log('✅ ارسال تمام شد');
+  };
+</script>
+</body>
+</html>

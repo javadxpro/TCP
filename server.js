@@ -30,6 +30,7 @@ let totalBytes = 0;
 const STATIC = {
   '/': ['index.html', 'text/html; charset=utf-8'],
   '/index.html': ['index.html', 'text/html; charset=utf-8'],
+  '/signal.js': ['signal.js', 'application/javascript; charset=utf-8'],
   '/manifest.json': ['manifest.json', 'application/json; charset=utf-8'],
   '/icon.svg': ['icon.svg', 'image/svg+xml; charset=utf-8'],
 };
